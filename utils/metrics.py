@@ -1,146 +1,141 @@
-# Originally written by wkentaro
-# https://github.com/wkentaro/pytorch-fcn/blob/master/torchfcn/utils.py
+# 图像分割任务模型指标
+## 1. Precision
+## 2. Recall
+## 3. (HD) Hausdorff距离
+## 4. (DSC) Dice相似系数
+## 5. F1-score
+## 6. Accuracy
 
+
+# todo: pre未通过测试
 import numpy as np
-import cv2
+import torch
+import torchmetrics
 
-def _fast_hist(label_true, label_pred, n_class):
-    mask = (label_true >= 0) & (label_true < n_class)
-    hist = np.bincount(
-        n_class * label_true[mask].astype(int) +
-        label_pred[mask], minlength=n_class**2).reshape(n_class, n_class)
-    return hist
+class SegmentationMetric():
 
+    def __init__(self, device="cuda" if torch.cuda.is_available() else 'cpu') -> None:
+        self.acc_metric = torchmetrics.Accuracy(task='binary', average='micro').to(device)
+        self.f1_metric = torchmetrics.F1Score(task='binary',average='micro').to(device)
+        # self.iou_metric = torchmetrics.IoU(num_classes=2, average='macro').to(device)
+        self.dice_metric = torchmetrics.Dice(num_classes=2, average='micro').to(device)
+        self.precision_metric = torchmetrics.Precision(task="binary", average='micro').to(device)
+        self.recall_metric = torchmetrics.Recall(task="binary").to(device)
+        self.hd_metric = torchmetrics.HammingDistance(task="binary", average='micro').to(device)
+    
+    def update(self, pred, label):
+        pred = pred.clone().detach()
+        label = label.clone().detach()
+        pred_clone = torch.tensor(pred > 0.5, dtype=torch.bool)
+        label_clone = torch.tensor(label > 0.5, dtype=torch.bool)
 
-def segmentation_scores(label_trues, label_preds, n_class):
-    """Returns accuracy score evaluation result.
-      - overall accuracy
-      - mean accuracy
-      - mean IU
-      - fwavacc
-    """
-    hist = np.zeros((n_class, n_class))
-    for lt, lp in zip(label_trues, label_preds):
-        hist += _fast_hist(lt.flatten(), lp.flatten(), n_class)
-    acc = np.diag(hist).sum() / hist.sum()
-    acc_cls = np.diag(hist) / hist.sum(axis=1)
-    acc_cls = np.nanmean(acc_cls)
-    iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
-    mean_iu = np.nanmean(iu)
-    freq = hist.sum(axis=1) / hist.sum()
-    fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
+        pred_clone, label_clone = torch.logical_not(pred_clone), torch.logical_not(label_clone)
 
-    return {'overall_acc': acc,
-            'mean_acc': acc_cls,
-            'freq_w_acc': fwavacc,
-            'mean_iou': mean_iu}
+        self.acc_metric(pred_clone, label_clone)
+        self.f1_metric(pred_clone, label_clone)
+        # self.iou_metric(pred, label)
+        self.dice_metric(pred_clone, label_clone)
+        self.precision_metric(pred_clone, label_clone)
+        self.recall_metric(pred_clone, label_clone)
+        self.hd_metric(pred_clone, label_clone)
+    
+    def compute(self): 
+        """返回评价指标计算结果
 
-
-def dice_score_list(label_gt, label_pred, n_class):
-    """
-
-    :param label_gt: [WxH] (2D images)
-    :param label_pred: [WxH] (2D images)
-    :param n_class: number of label classes
-    :return:
-    """
-    epsilon = 1.0e-6
-    assert len(label_gt) == len(label_pred)
-    batchSize = len(label_gt)
-    dice_scores = np.zeros((batchSize, n_class), dtype=np.float32)
-    for batch_id, (l_gt, l_pred) in enumerate(zip(label_gt, label_pred)):
-        for class_id in range(n_class):
-            img_A = np.array(l_gt == class_id, dtype=np.float32).flatten()
-            img_B = np.array(l_pred == class_id, dtype=np.float32).flatten()
-            score = 2.0 * np.sum(img_A * img_B) / (np.sum(img_A) + np.sum(img_B) + epsilon)
-            dice_scores[batch_id, class_id] = score
-
-    return np.mean(dice_scores, axis=0)
-
-
-def dice_score(label_gt, label_pred, n_class):
-    """
-
-    :param label_gt:
-    :param label_pred:
-    :param n_class:
-    :return:
-    """
-
-    epsilon = 1.0e-6
-    assert np.all(label_gt.shape == label_pred.shape)
-    dice_scores = np.zeros(n_class, dtype=np.float32)
-    for class_id in range(n_class):
-        img_A = np.array(label_gt == class_id, dtype=np.float32).flatten()
-        img_B = np.array(label_pred == class_id, dtype=np.float32).flatten()
-        score = 2.0 * np.sum(img_A * img_B) / (np.sum(img_A) + np.sum(img_B) + epsilon)
-        dice_scores[class_id] = score
-
-    return dice_scores
-
-
-def precision_and_recall(label_gt, label_pred, n_class):
-    from sklearn.metrics import precision_score, recall_score
-    assert len(label_gt) == len(label_pred)
-    precision = np.zeros(n_class, dtype=np.float32)
-    recall = np.zeros(n_class, dtype=np.float32)
-    img_A = np.array(label_gt, dtype=np.float32).flatten()
-    img_B = np.array(label_pred, dtype=np.float32).flatten()
-    precision[:] = precision_score(img_A, img_B, average=None, labels=range(n_class))
-    recall[:] = recall_score(img_A, img_B, average=None, labels=range(n_class))
-
-    return precision, recall
-
-
-def distance_metric(seg_A, seg_B, dx, k):
-    """
-        Measure the distance errors between the contours of two segmentations.
-        The manual contours are drawn on 2D slices.
-        We calculate contour to contour distance for each slice.
+        Returns:
+            dict: 评价指标计算结果，包括["acc", "f1", "dice", "precision", "recall", "hd"]
         """
+        acc = self.acc_metric.compute()
+        f1 = self.f1_metric.compute()
+        # iou = self.iou_metric.compute()
+        dice = self.dice_metric.compute()
+        precision = self.precision_metric.compute()
+        recall = self.recall_metric.compute()
+        hd = self.hd_metric.compute()
+        return {
+            "acc": acc,
+            "f1": f1,
+            # "iou": iou,
+            "dice": dice,
+            "pre": precision,
+            "rec": recall,
+            "hd": hd
+        }
+        # return acc, f1, iou, dice, precision, recall, hd
 
-    # Extract the label k from the segmentation maps to generate binary maps
-    seg_A = (seg_A == k)
-    seg_B = (seg_B == k)
+    def reset(self):
+        self.acc_metric.reset()
+        self.f1_metric.reset()
+        # self.iou_metric.reset()
+        self.dice_metric.reset()
+        self.precision_metric.reset()
+        self.recall_metric.reset()
+        self.hd_metric.reset()
 
-    table_md = []
-    table_hd = []
-    X, Y, Z = seg_A.shape
-    for z in range(Z):
-        # Binary mask at this slice
-        slice_A = seg_A[:, :, z].astype(np.uint8)
-        slice_B = seg_B[:, :, z].astype(np.uint8)
 
-        # The distance is defined only when both contours exist on this slice
-        if np.sum(slice_A) > 0 and np.sum(slice_B) > 0:
-            # Find contours and retrieve all the points
-            _, contours, _ = cv2.findContours(cv2.inRange(slice_A, 1, 1),
-                                              cv2.RETR_EXTERNAL,
-                                              cv2.CHAIN_APPROX_NONE)
-            pts_A = contours[0]
-            for i in range(1, len(contours)):
-                pts_A = np.vstack((pts_A, contours[i]))
 
-            _, contours, _ = cv2.findContours(cv2.inRange(slice_B, 1, 1),
-                                              cv2.RETR_EXTERNAL,
-                                              cv2.CHAIN_APPROX_NONE)
-            pts_B = contours[0]
-            for i in range(1, len(contours)):
-                pts_B = np.vstack((pts_B, contours[i]))
+if __name__ == '__main__':
 
-            # Distance matrix between point sets
-            M = np.zeros((len(pts_A), len(pts_B)))
-            for i in range(len(pts_A)):
-                for j in range(len(pts_B)):
-                    M[i, j] = np.linalg.norm(pts_A[i, 0] - pts_B[j, 0])
+    def metrics_test(pre: torch.Tensor, label: torch.Tensor):
+        # 将输入的灰度图转为二值图
+        pre = pre.cpu().detach().numpy()
+        label = label.cpu().detach().numpy()
+        # print(f"pre-{type(pre_label)}, label-{type(label)}")
 
-            # Mean distance and hausdorff distance
-            md = 0.5 * (np.mean(np.min(M, axis=0)) + np.mean(np.min(M, axis=1))) * dx
-            hd = np.max([np.max(np.min(M, axis=0)), np.max(np.min(M, axis=1))]) * dx
-            table_md += [md]
-            table_hd += [hd]
+        pre = pre > 0.5
+        label = label > 0.5
 
-    # Return the mean distance and Hausdorff distance across 2D slices
-    mean_md = np.mean(table_md) if table_md else None
-    mean_hd = np.mean(table_hd) if table_hd else None
-    return mean_md, mean_hd
+        seg_inv, gt_inv = np.logical_not(pre), np.logical_not(label)
+        true_pos = float(np.logical_and(pre, label).sum())
+        true_neg = float(np.logical_and(seg_inv, gt_inv).sum())
+        false_pos = float(np.logical_and(pre, gt_inv).sum())
+        false_neg = float(np.logical_and(seg_inv, label).sum())
+
+        #然后根据公式分别计算出这几种指标
+        prec = true_pos / (true_pos + false_pos + 1e-6)
+        rec = true_pos / (true_pos + false_neg + 1e-6)
+        accuracy = (true_pos + true_neg) / (true_pos + true_neg + false_pos + false_neg + 1e-6)
+        IoU = true_pos / (true_pos + false_neg + false_pos + 1e-6)
+
+        return prec, rec, accuracy, IoU
+
+
+
+    
+    
+
+    metric = SegmentationMetric()
+    # pred, label 的元素取值为0-1之间的浮点数
+    pred = torch.randn(1, 1, 512, 512).to("cuda")
+    label = torch.randn(1, 1, 512, 512).to("cuda")
+    # 归一化
+    pred = torch.sigmoid(pred)
+    label = torch.sigmoid(label)
+    # pred, label 的元素取值为0或1
+    print("cuda: ", torch.cuda.is_available())
+    # pred = torch.randint(0, 2, (1, 1, 512, 512)).to("cuda")
+    # label = torch.randint(0, 2, (1, 1, 512, 512)).to("cuda")
+    assert pred.is_cuda, "pred should be on cuda"
+    assert label.is_cuda, "label should be on cuda"
+    metric.update(pred, label)
+    metric_dict = metric.compute()
+    print(metric_dict)
+
+    prec, rec, acc, iou = metrics_test(pred, label)
+    test_dict = {
+        "pre": prec,
+        "rec": rec,
+        "acc": acc,
+        "iou": iou
+    }
+    print(test_dict)
+    # assert test_dict["pre"]== metric_dict['pre'], f"test_pre: {test_dict['pre']}, metric_pre: {metric_dict['pre']}"
+    # assert test_dict["rec"] == metric_dict['rec'], f"test_rec: {test_dict['rec']}, metric_rec: {metric_dict['rec']}"
+    # assert test_dict["acc"] == metric_dict['acc'], f"test_acc: {test_dict['acc']}, metric_acc: {metric_dict['acc']}"
+
+
+    print(f"test_pre: {test_dict['pre']}, metric_pre: {metric_dict['pre']}")
+    print(f"test_rec: {test_dict['rec']}, metric_rec: {metric_dict['rec']}")
+    print(f"test_acc: {test_dict['acc']}, metric_acc: {metric_dict['acc']}")
+    metric.reset()
+    print("test pass!")

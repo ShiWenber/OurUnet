@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import time
+import torchmetrics
 # from model.unet_model_ln.unet_model_ln import UNet
 # from model.unet_model_seattention import UNet
 # from model.unet_model_mobilevit import UNet
@@ -11,32 +12,7 @@ import time
 # from model.shift_unet.unet_model import UNet
 from model.biformer_unet.unet_model import UNet
 # from metrics import SegmentationMetric
-import numpy as np
-
-def metrics(pre_label: torch.Tensor, label: torch.Tensor):
-    # 将输入的灰度图转为二值图
-    pre_label = pre_label.cpu().detach().numpy()
-    label = label.cpu().detach().numpy()
-    # print(f"pre-{type(pre_label)}, label-{type(label)}")
-
-    pre_label = pre_label > 0.5
-    label = label > 0.5
-    
-    seg_inv, gt_inv = np.logical_not(pre_label), np.logical_not(label)
-    true_pos = float(np.logical_and(pre_label, label).sum())
-    true_neg = float(np.logical_and(seg_inv, gt_inv).sum())
-    false_pos = float(np.logical_and(pre_label, gt_inv).sum())
-    false_neg = float(np.logical_and(seg_inv, label).sum())
-
-    #然后根据公式分别计算出这几种指标
-    prec = true_pos / (true_pos + false_pos + 1e-6)
-    rec = true_pos / (true_pos + false_neg + 1e-6)
-    accuracy = (true_pos + true_neg) / (true_pos + true_neg + false_pos + false_neg + 1e-6)
-    IoU = true_pos / (true_pos + false_neg + false_pos + 1e-6)
-
-    return prec, rec, accuracy, IoU
-
-
+from utils.metrics import SegmentationMetric
 
 def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, file_type='png'):
     # 加载训练集
@@ -59,6 +35,7 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
     record = time.strftime("%Y-%m-%dT%H_%M_%S", record)
     record = record + input("请输入备注信息:")
     print(record)
+    metric = SegmentationMetric()
     # 训练epochs次
     for epoch in range(epochs):
         net.train()
@@ -73,13 +50,14 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
             label_g = label.to(device=device, dtype=torch.float32)
             # 使用网络参数预测
             pred = net(image_g)
+            assert pred.is_cuda, "pred is not cuda"
             # 计算loss
             loss = criterion(pred, label_g)
 
             accumulated_loss += loss.item()            
             count += 1
 
-            print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, epochs, loss.item()))
+            metric.update(pred, label_g)
 
 
 
@@ -100,10 +78,12 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
             # 更新参数
             loss.backward() # TODO 反向传播
             optimizer.step()
-        # 显示中间结果(仅仅显示效果最好的)
-        features = net.features
-        for i in features.keys():
-            writer.add_image(f"features{record}/{i}", features[i][0][0].detach().cpu().unsqueeze(dim=0), epoch)
+        print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, epochs, accumulated_loss / count))
+        # # 显示中间结果(仅仅显示效果最好的)并保存日志
+        # features = net.features
+        # for i in features.keys():
+        #     writer.add_image(f"features{record}/{i}", features[i][0][0].detach().cpu().unsqueeze(dim=0), epoch)
+
         writer.add_scalar(f'train{record}/loss' , loss.item(), epoch)
 
             ## 计算评价指标并记录---
@@ -120,26 +100,31 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
             # writer.add_scalar(f'IoU{record}/train' , IoU, epoch)
             # mIoU = metric.meanIntersectionOverUnion()
             # writer.add_scalar(f'mIoU{record}/train' , mIoU, epoch)
-            
-        prec, rec, accuracy, IoU = metrics(pred, label)
-        writer.add_scalar(f'train{record}/precision' , prec, epoch)
-        writer.add_scalar(f'train{record}/recall' , rec, epoch)
-        writer.add_scalar(f'train{record}/accuracy' , accuracy, epoch)
-        writer.add_scalar(f'train{record}/IoU' , IoU, epoch)
+        
+        metric_dict = metric.compute()   
+        metric.reset()
+        writer.add_scalar(f'train{record}/precision' , metric_dict["pre"], epoch)
+        writer.add_scalar(f'train{record}/recall' ,metric_dict['rec'], epoch)
+        writer.add_scalar(f'train{record}/accuracy' , metric_dict['acc'], epoch)
+        writer.add_scalar(f'train{record}/f1' , metric_dict['f1'], epoch)
+        writer.add_scalar(f'train{record}/dice' , metric_dict['dice'], epoch)
+        writer.add_scalar(f'train{record}/hd' , metric_dict['hd'], epoch)
 
-        log = open('log' + record + '.txt', 'w')
-        # log.write("epoches: " + epoch + "\n"  + "batch_size:" + batch_size + "\n" + "lr:" + lr + "\n" + "best_loss:" + best_loss + "\n")
-        log.write(f"epochs: {epochs}\nepoch: {epoch}\nbatch_size: {batch_size}\nlr: {lr}\nbest_loss: {best_loss}\n")
-        log.close()
+
     print("best_loss: ", best_loss)
+    log = open('log' + record + '.txt', 'w')
+    # log.write("epoches: " + epoch + "\n"  + "batch_size:" + batch_size + "\n" + "lr:" + lr + "\n" + "best_loss:" + best_loss + "\n")
+    log.write(f"epochs: {epochs}\nbatch_size: {batch_size}\nlr: {lr}\nbest_loss: {best_loss}\n")
+    log.close()
     torch.save(net.state_dict(), 'best_model' + record + '.pth')
 
 if __name__ == "__main__":
     # 选择设备，有cuda用cuda，没有就用cpu
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(device)
     # 加载网络，图片单通道1，分类为1
     # net = UNet(n_channels=3, n_classes=1)
-    net = UNet(n_channels=1, n_classes=1)
+    net = UNet(n_channels=1, n_classes=1).to(device=device)
 
     # 添加tensorboard
     writer = SummaryWriter(log_dir='logs', comment='UNet')
@@ -151,5 +136,5 @@ if __name__ == "__main__":
     # data_path = "shengnong/train"
     data_path = "new_data/train"
 
-    train_net(net, device, data_path, 30, 8, file_type='png')
+    train_net(net, device, data_path, 60, 16, file_type='png')
     writer.close()
