@@ -7,12 +7,13 @@ from torch.utils.tensorboard import SummaryWriter
 # from model.unet_model import UNet
 # from model.unet_model_seattention import UNet
 from model.unet_model_mobilevit import UNet
+from utils.metrics import SegmentationMetric
 import time
 
 if __name__ == "__main__":
 
     start_time = time.time()
-
+    
     # 选择设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # 加载网络,图片单通道1，分类为1。
@@ -52,12 +53,16 @@ if __name__ == "__main__":
         # writer.add_graph(net, img_tensor)
         # writer.add_image('input', img_tensor)
         # writer.add_image('output', pred)
+        
 
         # 提取结果
         pred = np.array(pred.data.cpu()[0])[0]
         # 处理结果
         pred[pred >= 0.5] = 255
         pred[pred < 0.5] = 0
+        # 计算acc
+
+
         # 保存图片
         print(save_res_path)
         cv2.imwrite(save_res_path, pred)

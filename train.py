@@ -1,20 +1,24 @@
+import argparse
+import glob
+import json
+
+import cv2
 from utils.dataset import ISBI_Loader
 from torch import optim
 import torch.nn as nn
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import time
-import torchmetrics
 # from model.unet_model_ln.unet_model_ln import UNet
 # from model.unet_model_seattention import UNet
 # from model.unet_model_mobilevit import UNet
 # from model.unet_model import UNet
 # from model.shift_unet.unet_model import UNet
-from model.biformer_unet.unet_model import UNet
+# from model.biformer_unet.unet_model import UNet
 # from metrics import SegmentationMetric
 from utils.metrics import SegmentationMetric
 
-def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, file_type='png'):
+def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.00001, file_type='png'):
     # 加载训练集
     isbi_dataset = ISBI_Loader(data_path, file_type)
     train_loader = torch.utils.data.DataLoader(dataset=isbi_dataset,
@@ -30,10 +34,7 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
 
     # best_loss 统计，初始化为正无穷
     best_loss = float('inf')
-    record = time.gmtime(time.time() + 8*60*60)
-    # 将record转换为字符串格式为: 2021-04-22T06:00:22
-    record = time.strftime("%Y-%m-%dT%H_%M_%S", record)
-    record = record + input("请输入备注信息:")
+    
     print(record)
     metric = SegmentationMetric()
     # 训练epochs次
@@ -50,6 +51,8 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
             label_g = label.to(device=device, dtype=torch.float32)
             # 使用网络参数预测
             pred = net(image_g)
+            # print("pred: ", pred)
+            # print("label_g: ", label_g.max())
             assert pred.is_cuda, "pred is not cuda"
             # 计算loss
             loss = criterion(pred, label_g)
@@ -85,21 +88,6 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
         #     writer.add_image(f"features{record}/{i}", features[i][0][0].detach().cpu().unsqueeze(dim=0), epoch)
 
         writer.add_scalar(f'train{record}/loss' , loss.item(), epoch)
-
-            ## 计算评价指标并记录---
-            ## 将预测出的二值化图像记录
-            # pred_label = torch.where(pred > 0.5, torch.ones_like(pred), torch.zeros_like(pred)) # 阈值为0.5
-            # metric.addBatch(pred_label, label)
-            # pa = metric.pixelAccuracy()
-            # writer.add_scalar(f'pa{record}/train' , pa, epoch)
-            # cpa = metric.classPixelAccuracy()
-            # writer.add_scalar(f'cpa{record}/train' , cpa, epoch)
-            # mpa = metric.meanPixelAccuracy()
-            # writer.add_scalar(f'mpa{record}/train' , mpa, epoch)
-            # IoU = metric.intersectionOverUnion()
-            # writer.add_scalar(f'IoU{record}/train' , IoU, epoch)
-            # mIoU = metric.meanIntersectionOverUnion()
-            # writer.add_scalar(f'mIoU{record}/train' , mIoU, epoch)
         
         metric_dict = metric.compute()   
         metric.reset()
@@ -110,6 +98,45 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
         writer.add_scalar(f'train{record}/dice' , metric_dict['dice'], epoch)
         writer.add_scalar(f'train{record}/hd' , metric_dict['hd'], epoch)
 
+        # 测试--
+        net.eval()
+        # 读取图片路径
+        tests_image_path = glob.glob(args.data_path + "/test/image/*")
+        tests_mask_path = glob.glob(args.data_path + "/test/mask/*")
+        for i in range(len(tests_image_path)):
+            assert tests_image_path[i].split("/")[-1].split(".")[0] == tests_mask_path[i].split("/")[-1].split(".")[0], "image and mask not match"
+            # 读取
+            img = cv2.imread(tests_image_path[i])
+            # 转灰度
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # 转为batch为1,通道为1的大小为512*512的数组
+            img = img.reshape(1,1,img.shape[0], img.shape[1])
+            # img = img.reshape(1,img.shape[0], img.shape[1])
+            # 转tensor
+            img_tensor = torch.from_numpy(img).to(device=device, dtype=torch.float32)
+            # 预测
+            pred = net(img_tensor)
+
+            # assert pred.max() <= 1, "pred max > 1"
+
+            img_mask = cv2.imread(tests_mask_path[i])
+            img_mask = cv2.cvtColor(img_mask, cv2.COLOR_BGR2GRAY)
+            img_mask = img_mask.reshape(1,1,img_mask.shape[0], img_mask.shape[1])
+            img_mask_tensor = torch.from_numpy(img_mask).to(device=device, dtype=torch.float32)
+
+            # assert img_mask_tensor.max() <= 1, "img_mask_tensor max > 1"
+            
+            metric.update(pred, img_mask_tensor)
+
+            # tensorboard记录中间特征图
+            # writer.add_graph(net, img_tensor)
+            # writer.add_image('input', img_tensor)
+            # writer.add_image('output', pred)
+        metric_dict = metric.compute()
+        metric.reset()
+        writer.add_scalar(f'train{record}/accuracy' , metric_dict["acc"], epoch)
+
+
 
     print("best_loss: ", best_loss)
     log = open('log' + record + '.txt', 'w')
@@ -117,24 +144,78 @@ def train_net(net, device, data_path, epochs = 60, batch_size=2, lr = 0.00001, f
     log.write(f"epochs: {epochs}\nbatch_size: {batch_size}\nlr: {lr}\nbest_loss: {best_loss}\n")
     log.close()
     torch.save(net.state_dict(), 'best_model' + record + '.pth')
+    return net
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="ourunet")
+    # parser.add_argument("--dataname", type=str, default="ENZYMES")
+    parser.add_argument("--data_path", type=str, default="xirou")
+    parser.add_argument("--data_file_type", type=str, default="png")
+    parser.add_argument("--cuda", type=int, default=0)
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--lr", type=float, default=0.00001)
+    parser.add_argument("--model", type=str, default="unet")
+    parser.add_argument("--n_classes", type=int, default=1)
+    parser.add_argument("--n_channels", type=int, default=1)
+
+
+    args = parser.parse_args()
+
+    print(args)
+
+    # 将命令行参数转换为字典类型
+    hparams_dict = vars(args)
+    # 将字典转换为 JSON 格式的字符串
+    hparams_json_str = json.dumps(hparams_dict)
+
+    # from model.unet_model_ln.unet_model_ln import UNet
+    if args.model == "unet":
+        from model.unet_model import UNet
+    elif args.model == "unet_ln":
+        from model.unet_model_ln.unet_model_ln import UNet    
+    elif args.model == "unet_se":
+        from model.unet_model_seattention import UNet
+    elif args.model == "unet_mobilevit":
+        from model.unet_model_mobilevit import UNet
+    elif args.model == "unet_shift":
+        from model.shift_unet.unet_model import UNet
+    elif args.model == "unet_biformer":
+        from model.biformer_unet.unet_model import UNet
+    else:
+        raise ValueError("model name error")
+    
     # 选择设备，有cuda用cuda，没有就用cpu
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
     # 加载网络，图片单通道1，分类为1
     # net = UNet(n_channels=3, n_classes=1)
-    net = UNet(n_channels=1, n_classes=1).to(device=device)
+    net = UNet(n_channels=args.n_channels, n_classes=args.n_classes).to(device=device)
 
+    record = time.gmtime(time.time() + 8*60*60)
+    # 将record转换为字符串格式为: 2021-04-22T06:00:22
+    record = time.strftime("%Y-%m-%dT%H_%M_%S", record)
     # 添加tensorboard
     writer = SummaryWriter(log_dir='logs', comment='UNet')
+
+    writer.add_text(f'train{record}/hparams', hparams_json_str)
+   
+        
 
     # 将网络拷贝到deivce中
     net.to(device=device)
     # 指定训练集地址，开始训练
     # data_path = "xirou/train/"
     # data_path = "shengnong/train"
-    data_path = "new_data/train"
+    # data_path = "new_data/train"
 
-    train_net(net, device, data_path, 60, 16, file_type='png')
+    net = train_net(net, device, args.data_path + "/train", record,  args.epochs, args.batch_size, file_type=args.data_file_type, lr=args.lr)
+
+
+    # 测试
+    # metric = SegmentationMetric()
+
+    
+
     writer.close()
