@@ -46,10 +46,10 @@ class ISBI_Loader(Dataset):
         return len(self.imgs_path)
 
 if __name__ == "__main__":
-    isbi_dataset = ISBI_Loader('data/train/')    
+    isbi_dataset = ISBI_Loader('new_data/test')    
     print("数据个数：", len(isbi_dataset))
     train_loader = torch.utils.data.DataLoader(dataset=isbi_dataset,
                                                batch_size=2,
                                                shuffle=True)
-    for image, label in train_loader:
-        print(image.shape)
+    # for image, label in train_loader:
+    #     print(image.shape)

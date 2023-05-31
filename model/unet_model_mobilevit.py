@@ -19,7 +19,7 @@ class UNet(nn.Module):
         self.down2 = Down(128, 256)
         self.down3 = Down(256, 512)
         self.down4 = Down(512, 512)
-        self.mobileVitAttention = MobileViTAttention(512, patch_size=8)
+        self.mobileVitAttention = MobileViTAttention(512, patch_size=4)
 
         # # adaptation layer
         # # 1x1x1 relu

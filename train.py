@@ -20,10 +20,17 @@ from utils.metrics import SegmentationMetric
 
 def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.00001, file_type='png'):
     # 加载训练集
-    isbi_dataset = ISBI_Loader(data_path, file_type)
-    train_loader = torch.utils.data.DataLoader(dataset=isbi_dataset,
+    train_dataset = ISBI_Loader(data_path + "/train", file_type)
+    test_dataset = ISBI_Loader(data_path + "/test", file_type)
+
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=batch_size,
+                                               num_workers=2,
                                                shuffle=True)
+    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
+                                              batch_size=1,
+                                              num_workers=2,
+                                              shuffle=False)
     # 定义损失函数RMSprop
     optimizer = optim.RMSprop(net.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
     # 定义Loss算法，使用指标为Binary Cross Entropy并且计算前先使用sigmoid函数归一化
@@ -96,45 +103,22 @@ def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.
         writer.add_scalar(f'train{record}/accuracy' , metric_dict['acc'], epoch)
         writer.add_scalar(f'train{record}/f1' , metric_dict['f1'], epoch)
         writer.add_scalar(f'train{record}/dice' , metric_dict['dice'], epoch)
-        writer.add_scalar(f'train{record}/hd' , metric_dict['hd'], epoch)
+        writer.add_scalar(f'train{record}/hd:' , metric_dict['hd'], epoch)
+        print("train_acc", metric_dict["acc"])
 
         # 测试--
         net.eval()
         # 读取图片路径
-        tests_image_path = glob.glob(args.data_path + "/test/image/*")
-        tests_mask_path = glob.glob(args.data_path + "/test/mask/*")
-        for i in range(len(tests_image_path)):
-            assert tests_image_path[i].split("/")[-1].split(".")[0] == tests_mask_path[i].split("/")[-1].split(".")[0], "image and mask not match"
-            # 读取
-            img = cv2.imread(tests_image_path[i])
-            # 转灰度
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # 转为batch为1,通道为1的大小为512*512的数组
-            img = img.reshape(1,1,img.shape[0], img.shape[1])
-            # img = img.reshape(1,img.shape[0], img.shape[1])
-            # 转tensor
-            img_tensor = torch.from_numpy(img).to(device=device, dtype=torch.float32)
-            # 预测
-            pred = net(img_tensor)
+        for img, label in test_loader:
+            img = img.to(device=device, dtype=torch.float32)
+            label = label.to(device=device, dtype=torch.float32)
+            pred = net(img)
+            metric.update(pred, label)
 
-            # assert pred.max() <= 1, "pred max > 1"
-
-            img_mask = cv2.imread(tests_mask_path[i])
-            img_mask = cv2.cvtColor(img_mask, cv2.COLOR_BGR2GRAY)
-            img_mask = img_mask.reshape(1,1,img_mask.shape[0], img_mask.shape[1])
-            img_mask_tensor = torch.from_numpy(img_mask).to(device=device, dtype=torch.float32)
-
-            # assert img_mask_tensor.max() <= 1, "img_mask_tensor max > 1"
-            
-            metric.update(pred, img_mask_tensor)
-
-            # tensorboard记录中间特征图
-            # writer.add_graph(net, img_tensor)
-            # writer.add_image('input', img_tensor)
-            # writer.add_image('output', pred)
         metric_dict = metric.compute()
         metric.reset()
         writer.add_scalar(f'train{record}/accuracy' , metric_dict["acc"], epoch)
+        print("test_acc", metric_dict["acc"])
 
 
 
@@ -210,7 +194,7 @@ if __name__ == "__main__":
     # data_path = "shengnong/train"
     # data_path = "new_data/train"
 
-    net = train_net(net, device, args.data_path + "/train", record,  args.epochs, args.batch_size, file_type=args.data_file_type, lr=args.lr)
+    net = train_net(net, device, args.data_path, record,  args.epochs, args.batch_size, file_type=args.data_file_type, lr=args.lr)
 
 
     # 测试
