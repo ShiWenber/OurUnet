@@ -167,6 +167,8 @@ if __name__ == "__main__":
         from model.shift_unet.unet_model import UNet
     elif args.model == "unet_biformer":
         from model.biformer_unet.unet_model import UNet
+    elif args.model == "unet_mobilevit_biformer":
+        from model.mvit_biformer_unet.unet_model import UNet
     else:
         raise ValueError("model name error")
     
