@@ -3,7 +3,7 @@ import glob
 import json
 
 import cv2
-from utils.dataset import ISBI_Loader
+from utils.dataset import MyLoader
 from torch import optim
 import torch.nn as nn
 import torch
@@ -20,8 +20,8 @@ from utils.metrics import SegmentationMetric
 
 def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.00001, file_type='png'):
     # 加载训练集
-    train_dataset = ISBI_Loader(data_path + "/train", file_type)
-    test_dataset = ISBI_Loader(data_path + "/test", file_type)
+    train_dataset = MyLoader(data_path + "/train", file_type)
+    test_dataset = MyLoader(data_path + "/test", file_type)
 
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=batch_size,
@@ -57,9 +57,10 @@ def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.
             image_g = image.to(device=device, dtype=torch.float32)
             label_g = label.to(device=device, dtype=torch.float32)
             # 使用网络参数预测
-            pred = net(image_g)
+            _, pred = net(image_g)
             # print("pred: ", pred)
             # print("label_g: ", label_g.max())
+            # print("pred: ", pred.shape)
             assert pred.is_cuda, "pred is not cuda"
             # 计算loss
             loss = criterion(pred, label_g)
@@ -112,7 +113,7 @@ def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.
         for img, label in test_loader:
             img = img.to(device=device, dtype=torch.float32)
             label = label.to(device=device, dtype=torch.float32)
-            pred = net(img)
+            _, pred = net(img)
             metric.update(pred, label)
 
         metric_dict = metric.compute()
@@ -169,6 +170,8 @@ if __name__ == "__main__":
         from model.biformer_unet.unet_model import UNet
     elif args.model == "unet_mobilevit_biformer":
         from model.mvit_biformer_unet.unet_model import UNet
+    elif args.model == "doubleunet":
+        from model.doubleunet_pytorch import build_doubleunet
     else:
         raise ValueError("model name error")
     
@@ -177,7 +180,8 @@ if __name__ == "__main__":
     print(device)
     # 加载网络，图片单通道1，分类为1
     # net = UNet(n_channels=3, n_classes=1)
-    net = UNet(n_channels=args.n_channels, n_classes=args.n_classes).to(device=device)
+    net = build_doubleunet()
+    # net = UNet(n_channels=args.n_channels, n_classes=args.n_classes).to(device=device)
 
     record = time.gmtime(time.time() + 8*60*60)
     # 将record转换为字符串格式为: 2021-04-22T06:00:22
