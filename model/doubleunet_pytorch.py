@@ -229,7 +229,11 @@ class build_doubleunet(nn.Module):
         x = self.d2(x, skip1, skip2)
         y2 = self.y2(x)
 
-        return y1, y2
+        # 原始输出
+        # return y1, y2
+
+        pred = y2.squeeze(dim=1)
+        return pred
 
 if __name__ == "__main__":
     import numpy as np
