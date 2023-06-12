@@ -58,9 +58,19 @@ def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.
             label_g = label.to(device=device, dtype=torch.float32)
             # 使用网络参数预测
             _, pred = net(image_g)
+            # 因为label是单通道的 将 bchw 转换为 bhw 
+            pred_out = pred.squeeze(dim=1)
+            # print("pred_out: ", pred_out.shape)
+            # 保存预测结果
+            # cv2.imwrite("pred_out1.png", pred_out[0].detach().cpu().numpy() * 255)
+            # cv2.imwrite("pred_out2.png", pred_out[1].detach().cpu().numpy() * 255)
+
             # print("pred: ", pred)
             # print("label_g: ", label_g.max())
             # print("pred: ", pred.shape)
+
+            # print(pred.shape)
+            # print(label_g.shape)
             assert pred.is_cuda, "pred is not cuda"
             # 计算loss
             loss = criterion(pred, label_g)
