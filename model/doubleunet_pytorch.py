@@ -202,7 +202,8 @@ class decoder2(nn.Module):
         return x
 
 class build_doubleunet(nn.Module):
-    def __init__(self):
+    # def __init__(self):
+    def __init__(self, num_classes=1) -> None:
         super().__init__()
 
         self.e1 = encoder1()
@@ -214,7 +215,9 @@ class build_doubleunet(nn.Module):
         self.e2 = encoder2()
         self.a2 = ASPP(256, 64)
         self.d2 = decoder2()
-        self.y2 = nn.Conv2d(32, 1, kernel_size=1, padding=0)
+        # self.y2 = nn.Conv2d(32, 1, kernel_size=1, padding=0) # 输出为 b * 1 * h * w
+        self.y2 = nn.Conv2d(32, num_classes, kernel_size=1, padding=0) # 输出为 b * num_classes * h * w
+
 
     def forward(self, x):
         x0 = x
@@ -223,16 +226,20 @@ class build_doubleunet(nn.Module):
         x = self.d1(x, skip1)
         y1 = self.y1(x)
 
+        # todo 更改 sigmoid 为其他的激活函数
         input_x = x0 * self.sigmoid(y1)
         x, skip2 = self.e2(input_x)
         x = self.a2(x)
         x = self.d2(x, skip1, skip2)
         y2 = self.y2(x)
 
+        # print("y2: ", y2.shape)
+
         # 原始输出
         # return y1, y2
 
         pred = y2.squeeze(dim=1)
+        print("pred: ", pred.shape)
         return pred
 
 if __name__ == "__main__":
