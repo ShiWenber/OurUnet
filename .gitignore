@@ -226,4 +226,4 @@ $RECYCLE.BIN/
 *.pth
 data/
 infer_out/
-logs/
+model_out/
