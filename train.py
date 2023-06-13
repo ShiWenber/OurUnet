@@ -1,178 +1,116 @@
 import argparse
-import glob
-import json
+import logging
+import os
 import random
+import warnings
+from pydoc import locate
 
-import cv2
 import numpy as np
-from utils.dataset import MyLoader
-from torch import optim
-import torch.nn as nn
 import torch
-from torch.utils.tensorboard import SummaryWriter
-import time
-# from model.unet_model_ln.unet_model_ln import UNet
-# from model.unet_model_seattention import UNet
-# from model.unet_model_mobilevit import UNet
-# from model.unet_model import UNet
-# from model.shift_unet.unet_model import UNet
-# from model.biformer_unet.unet_model import UNet
-# from metrics import SegmentationMetric
-from utils.metrics import SegmentationMetric
+import torch.backends.cudnn as cudnn
 
-def train_net(net, device, data_path, record, epochs = 60, batch_size=2, lr = 0.00001, file_type='png'):
-    # 加载训练集
-    train_dataset = MyLoader(data_path + "/train", file_type)
-    test_dataset = MyLoader(data_path + "/test", file_type)
+import model
+from model.doubleunet_pytorch import build_doubleunet
 
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                               batch_size=batch_size,
-                                               num_workers=2,
-                                               shuffle=True)
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                              batch_size=1,
-                                              num_workers=2,
-                                              shuffle=False)
-    # 定义损失函数RMSprop
-    optimizer = optim.RMSprop(net.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
-    # 定义Loss算法，使用指标为Binary Cross Entropy并且计算前先使用sigmoid函数归一化
-    criterion = nn.BCEWithLogitsLoss() 
+from trainer import trainer_synapse
+warnings.filterwarnings("ignore")
 
-    # # 计算评价指标并记录---
-    # metric = SegmentationMetric(2) # 2为类别数
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--root_path",
+    type=str,
+    default="./data/Synapse/train_npz",
+    help="root dir for train data",
+)
+parser.add_argument(
+    "--test_path",
+    type=str,
+    default="./data/Synapse/test_vol_h5",
+    help="root dir for test1 data",
+)
+parser.add_argument("--dataset", type=str, default="Synapse", help="experiment_name")
+parser.add_argument("--list_dir", type=str, default="./lists/lists_Synapse", help="list dir")
+parser.add_argument("--num_classes", type=int, default=9, help="output channel of network")
+parser.add_argument("--output_dir", type=str, default="./model_out", help="output dir")
+parser.add_argument("--max_iterations", type=int, default=200, help="maximum epoch number to train")
+parser.add_argument("--max_epochs", type=int, default=1, help="maximum epoch number to train")
+parser.add_argument("--batch_size", type=int, default=5, help="batch_size per gpu")
+parser.add_argument("--num_workers", type=int, default=0, help="num_workers")
+parser.add_argument("--eval_interval", type=int, default=1, help="eval_interval")
+parser.add_argument("--model_name", type=str, default="synapse", help="model_name")
+parser.add_argument("--n_gpu", type=int, default=1, help="total gpu")
+parser.add_argument("--deterministic", type=int, default=1, help="whether to use deterministic training")
+parser.add_argument("--base_lr", type=float, default=0.05, help="segmentation network base learning rate")
+parser.add_argument("--img_size", type=int, default=224, help="input patch size of network input")
+parser.add_argument("--z_spacing", type=int, default=1, help="z_spacing")
+parser.add_argument("--seed", type=int, default=1234, help="random seed")
+parser.add_argument("--zip", action="store_true", help="use zipped dataset instead of folder dataset")
+parser.add_argument(
+    "--cache-mode",
+    type=str,
+    default="part",
+    choices=["no", "full", "part"],
+    help="no: no cache, "
+    "full: cache all data, "
+    "part: sharding the dataset into nonoverlapping pieces and only cache one piece",
+)
+parser.add_argument("--resume", help="resume from checkpoint")
+parser.add_argument("--accumulation-steps", type=int, help="gradient accumulation steps")
+parser.add_argument(
+    "--use-checkpoint", action="store_true", help="whether to use gradient checkpointing to save memory"
+)
+parser.add_argument(
+    "--amp-opt-level",
+    type=str,
+    default="O1",
+    choices=["O0", "O1", "O2"],
+    help="mixed precision opt level, if O0, no amp is used",
+)
+parser.add_argument("--tag", help="tag of experiment")
+parser.add_argument("--eval", action="store_true", help="Perform evaluation only")
+parser.add_argument("--throughput", action="store_true", help="Test throughput only")
+parser.add_argument(
+    "--module",
+    # default=networks.doubleunet.DoubleUNet,
+    default=model.doubleunet_pytorch.build_doubleunet,
+    help="The module that you want to load as the network, e.g. model.doubleunet_pytorch.build_doubleunet",
+)
 
-    # best_loss 统计，初始化为正无穷
-    best_loss = float('inf')
-    
-    print(record)
-    metric = SegmentationMetric()
-    # 训练epochs次
-    for epoch in range(epochs):
-        net.train()
-        # accumulated_loss = tensor.Places365Tensor(0)
-        accumulated_loss = 0
-        count = 0
-        # 按照batch_size进行训练
-        for image, label in train_loader:
-            optimizer.zero_grad()
-            # 数据拷贝到GPU
-            image_g = image.to(device=device, dtype=torch.float32)
-            label_g = label.to(device=device, dtype=torch.float32)
-            # 使用网络参数预测
-            pred = net(image_g)
-            # 因为label是单通道的 将 bchw 转换为 bhw 
-            # print("pred_out: ", pred_out.shape)
-            # 保存预测结果
-            # cv2.imwrite("pred_out1.png", pred_out[0].detach().cpu().numpy() * 255)
-            # cv2.imwrite("pred_out2.png", pred_out[1].detach().cpu().numpy() * 255)
+args = parser.parse_args()
 
-            # print("pred: ", pred)
-            # print("label_g: ", label_g.max())
-            # print("pred: ", pred.shape)
-
-            # print(pred.shape)
-            # print(label_g.shape)
-            print("pred: ", pred.shape)
-            assert pred.is_cuda, "pred is not cuda"
-            print("label_g: ", label_g.squeeze(dim=1).shape)
-            label_g = label_g.squeeze(dim=1)
-            # 计算loss
-            loss = criterion(pred, label_g)
-
-            accumulated_loss += loss.item()            
-            count += 1
-
-            metric.update(pred, label_g)
-
-
-
-            # # tensorboard中显示特征图
-            # # writer.add_graph(net, image)
-            # # 显示中间结果(仅仅显示效果最好的)
-            # features = net.features
-            # for i in features.keys():
-            #     writer.add_image(f"features/{i}" + record, features[i][0][0].detach().cpu().unsqueeze(dim=0), epoch)
-
-
-            # 保存loss最小的模型
-            if loss < best_loss:
-                best_loss = loss
-                # tensorboard中显示特征图
-                # writer.add_graph(net, image)
-                
-            # 更新参数
-            loss.backward() # TODO 反向传播
-            optimizer.step()
-        print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, epochs, accumulated_loss / count))
-        # # 显示中间结果(仅仅显示效果最好的)并保存日志
-        # features = net.features
-        # for i in features.keys():
-        #     writer.add_image(f"features{record}/{i}", features[i][0][0].detach().cpu().unsqueeze(dim=0), epoch)
-
-        writer.add_scalar(f'train{record}/loss' , loss.item(), epoch)
-        
-        metric_dict = metric.compute()   
-        metric.reset()
-        writer.add_scalar(f'train{record}/precision' , metric_dict["pre"], epoch)
-        writer.add_scalar(f'train{record}/recall' ,metric_dict['rec'], epoch)
-        writer.add_scalar(f'train{record}/accuracy' , metric_dict['acc'], epoch)
-        writer.add_scalar(f'train{record}/f1' , metric_dict['f1'], epoch)
-        writer.add_scalar(f'train{record}/dice' , metric_dict['dice'], epoch)
-        writer.add_scalar(f'train{record}/hd:' , metric_dict['hd'], epoch)
-        print("train_acc", metric_dict["acc"])
-
-        # 测试--
-        net.eval()
-        # 读取图片路径
-        for img, label in test_loader:
-            img = img.to(device=device, dtype=torch.float32)
-            label = label.to(device=device, dtype=torch.float32)
-            _, pred = net(img)
-            metric.update(pred, label)
-
-        metric_dict = metric.compute()
-        metric.reset()
-        writer.add_scalar(f'train{record}/accuracy' , metric_dict["acc"], epoch)
-        print("test_acc", metric_dict["acc"])
-
-
-
-    print("best_loss: ", best_loss)
-    log = open('log' + record + '.txt', 'w')
-    # log.write("epoches: " + epoch + "\n"  + "batch_size:" + batch_size + "\n" + "lr:" + lr + "\n" + "best_loss:" + best_loss + "\n")
-    log.write(f"epochs: {epochs}\nbatch_size: {batch_size}\nlr: {lr}\nbest_loss: {best_loss}\n")
-    log.close()
-    torch.save(net.state_dict(), 'best_model' + record + '.pth')
-    return net
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description="ourunet")
-    # parser.add_argument("--dataname", type=str, default="ENZYMES")
-    parser.add_argument("--data_path", type=str, default="xirou")
-    parser.add_argument("--data_file_type", type=str, default="png")
-    parser.add_argument("--cuda", type=int, default=0)
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--lr", type=float, default=0.00001)
-    parser.add_argument("--model", type=str, default="unet")
-    parser.add_argument("--n_classes", type=int, default=1)
-    parser.add_argument("--n_channels", type=int, default=1)
-    parser.add_argument("--num_classes", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=23307)
-
-
-
-    args = parser.parse_args()
+    # setting device on GPU if available, else CPU，选择设备
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
+    print()
+    net = build_doubleunet( num_classes=args.num_classes).cuda(0)
 
     print(args)
+    # Additional Info when using cuda，检查设备，查看设备已分配资源和已经保存资源
+    if device.type == "cuda":
+        print("我使用的设备是"+torch.cuda.get_device_name(0))
+        print("Memory Usage:")
+        print("Allocated:", round(torch.cuda.memory_allocated(0) / 1024**3, 1), "GB")
+        print("Cached:   ", round(torch.cuda.memory_reserved(0) / 1024**3, 1), "GB")
 
-    # 手动设置随机种子
+    #表示该程序只能看到为0的设备，也就是我的RTX2070
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+
+
+    if not args.deterministic:
+        cudnn.benchmark = True
+        cudnn.deterministic = False
+    else:
+        cudnn.benchmark = False
+        cudnn.deterministic = True
+
+    # 随机参数固定化
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-
 
     dataset_name = args.dataset
     dataset_config = {
@@ -182,63 +120,22 @@ if __name__ == "__main__":
             "num_classes": 9,
         },
     }
+    print(args.root_path)
+    print(args.list_dir)
+    if args.batch_size != 24 and args.batch_size % 5 == 0:
+        args.base_lr *= args.batch_size / 24
+    print(args.base_lr)
 
-    # 将命令行参数转换为字典类型
-    hparams_dict = vars(args)
-    # 将字典转换为 JSON 格式的字符串
-    hparams_json_str = json.dumps(hparams_dict)
+    args.num_classes = dataset_config[dataset_name]["num_classes"]
+    args.root_path = dataset_config[dataset_name]["root_path"]
+    args.list_dir = dataset_config[dataset_name]["list_dir"]
 
-    # from model.unet_model_ln.unet_model_ln import UNet
-    if args.model == "unet":
-        from model.unet_model import UNet
-    elif args.model == "unet_ln":
-        from model.unet_model_ln.unet_model_ln import UNet    
-    elif args.model == "unet_se":
-        from model.unet_model_seattention import UNet
-    elif args.model == "unet_mobilevit":
-        from model.unet_model_mobilevit import UNet
-    elif args.model == "unet_shift":
-        from model.shift_unet.unet_model import UNet
-    elif args.model == "unet_biformer":
-        from model.biformer_unet.unet_model import UNet
-    elif args.model == "unet_mobilevit_biformer":
-        from model.mvit_biformer_unet.unet_model import UNet
-    elif args.model == "doubleunet":
-        from model.doubleunet_pytorch import build_doubleunet
-    else:
-        raise ValueError("model name error")
-    
-    # 选择设备，有cuda用cuda，没有就用cpu
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(device)
-    # 加载网络，图片单通道1，分类为1
-    # net = UNet(n_channels=3, n_classes=1)
-    net = build_doubleunet(num_classes=args.num_classes)
-    # net = UNet(n_channels=args.n_channels, n_classes=args.n_classes).to(device=device)
-
-    record = time.gmtime(time.time() + 8*60*60)
-    # 将record转换为字符串格式为: 2021-04-22T06:00:22
-    record = time.strftime("%Y-%m-%dT%H_%M_%S", record)
-    # 添加tensorboard
-    writer = SummaryWriter(log_dir='logs', comment='UNet')
-
-    writer.add_text(f'train{record}/hparams', hparams_json_str)
-   
-        
-
-    # 将网络拷贝到deivce中
-    net.to(device=device)
-    # 指定训练集地址，开始训练
-    # data_path = "xirou/train/"
-    # data_path = "shengnong/train"
-    # data_path = "new_data/train"
-
-    net = train_net(net, device, args.data_path, record,  args.epochs, args.batch_size, file_type=args.data_file_type, lr=args.lr)
-
-
-    # 测试
-    # metric = SegmentationMetric()
-
-    
-
-    writer.close()
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    # net = transformer(num_classes=args.num_classes).cuda(0)
+    net = build_doubleunet(num_classes=args.num_classes).cuda(0)
+    trainer = {
+        "Synapse": trainer_synapse,
+    }
+    print(trainer[dataset_name])
+    trainer[dataset_name](args, net, args.output_dir)
