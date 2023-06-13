@@ -1,8 +1,10 @@
 import argparse
 import glob
 import json
+import random
 
 import cv2
+import numpy as np
 from utils.dataset import MyLoader
 from torch import optim
 import torch.nn as nn
@@ -156,11 +158,30 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="unet")
     parser.add_argument("--n_classes", type=int, default=1)
     parser.add_argument("--n_channels", type=int, default=1)
+    parser.add_argument("--num_classes", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=23307)
+
 
 
     args = parser.parse_args()
 
     print(args)
+
+    # 手动设置随机种子
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+
+
+    dataset_name = args.dataset
+    dataset_config = {
+        "Synapse": {
+            "root_path": args.root_path,
+            "list_dir": args.list_dir,
+            "num_classes": 9,
+        },
+    }
 
     # 将命令行参数转换为字典类型
     hparams_dict = vars(args)
@@ -192,7 +213,7 @@ if __name__ == "__main__":
     print(device)
     # 加载网络，图片单通道1，分类为1
     # net = UNet(n_channels=3, n_classes=1)
-    net = build_doubleunet()
+    net = build_doubleunet(num_classes=args.num_classes)
     # net = UNet(n_channels=args.n_channels, n_classes=args.n_classes).to(device=device)
 
     record = time.gmtime(time.time() + 8*60*60)
