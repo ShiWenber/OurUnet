@@ -260,7 +260,7 @@ class build_doubleunet(nn.Module):
         else:
             self.e1 = encoder1(in_channels)
         self.a1 = ASPP(512, 64)
-        self.d1 = decoder1()
+        self.d1 = decoder1(in_channels=64, skip_channels=[512, 256, 128, 64]) # 输入 64 维度，并且将跨层连接的通道数设置为 [512, 256, 128, 64]
         self.y1 = nn.Conv2d(32, 1, kernel_size=1, padding=0)
         self.sigmoid = nn.Sigmoid()
 
@@ -274,7 +274,7 @@ class build_doubleunet(nn.Module):
     def forward(self, x):
         x0 = x # batch_size * c * h * w
         # todo 不使用5层的 encoder1改回4层
-        x, skip1 = self.e1(x)  
+        x, skip1 = self.e1(x)  # x.channel = 512， skip1_channel = [512, 256, 128, 64]
         x = self.a1(x)
         x = self.d1(x, skip1)
         y1 = self.y1(x)

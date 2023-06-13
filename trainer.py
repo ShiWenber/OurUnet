@@ -125,11 +125,19 @@ def trainer_synapse(args, model, snapshot_path):
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
-    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True,
+    # trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True,
+    #                          worker_init_fn=worker_init_fn)
+
+    # 保证取数据随机，内存不够大不要选pin_memory为True
+    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False,
                              worker_init_fn=worker_init_fn)
     # 创建测试数据集和数据加载器。
     db_test = Synapse_dataset(base_dir=args.test_path, split="test_vol", list_dir=args.list_dir, img_size=args.img_size)
-    testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=1)
+
+    # testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+
+    # 保证测试集固定，防止结果波动
+    testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=False)
     # 如果有多个GPU，则使用DataParallel。
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
@@ -139,7 +147,9 @@ def trainer_synapse(args, model, snapshot_path):
     ce_loss = CrossEntropyLoss()
     dice_loss = DiceLoss(num_classes)
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
-    writer = SummaryWriter(snapshot_path + '/log')
+    print("snapshot_path", snapshot_path)
+    time_str = time.strftime('%Y-%m-%d-%H-%M')
+    writer = SummaryWriter(snapshot_path + '/log' + time_str)
     iter_num = 0
     max_epoch = args.max_epochs
     max_iterations = args.max_epochs * len(trainloader)  # max_epoch = max_iterations // len(trainloader) + 1
@@ -180,16 +190,20 @@ def trainer_synapse(args, model, snapshot_path):
             writer.add_scalar('info/loss_ce', loss_ce, iter_num)
             writer.add_scalar('info/loss_dice', loss_dice, iter_num)
             # 记录训练信息。
-            logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f' % (iter_num, loss.item(), loss_ce.item(), loss_dice.item()))
+            # logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f' % (iter_num, loss.item(), loss_ce.item(), loss_dice.item()))
             # 可视化训练结果。
+            # if iter_num % 20 == 0:
             if iter_num % 20 == 0:
                 image = image_batch[1, 0:1, :, :]
                 image = (image - image.min()) / (image.max() - image.min())
                 writer.add_image('train/Image', image, iter_num)
+                # writer.add_image('train/Image', image, iter_num / batch_size)
                 outputs = torch.argmax(torch.softmax(outputs, dim=1), dim=1, keepdim=True)
                 writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num)
+                # writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
                 labs = label_batch[1, ...].unsqueeze(0) * 50
                 writer.add_image('train/GroundTruth', labs, iter_num)
+                # writer.add_image('train/GroundTruth', labs, iter_num / batch_size)
         # Test
         # 测试
         eval_interval = args.eval_interval 

@@ -25,16 +25,16 @@ parser.add_argument(
 parser.add_argument(
     "--test_path",
     type=str,
-    default="./data/Synapse/test_vol_h5",
+    default="../data/Synapse/test_vol_h5",
     help="root dir for test1 data",
 )
 parser.add_argument("--dataset", type=str, default="Synapse", help="experiment_name")
 parser.add_argument("--list_dir", type=str, default="./lists/lists_Synapse", help="list dir")
 parser.add_argument("--num_classes", type=int, default=9, help="output channel of network")
 parser.add_argument("--output_dir", type=str, default="./model_out", help="output dir")
-parser.add_argument("--max_iterations", type=int, default=200, help="maximum epoch number to train")
+# parser.add_argument("--max_iterations", type=int, default=200, help="maximum epoch number to train")
 parser.add_argument("--max_epochs", type=int, default=1, help="maximum epoch number to train")
-parser.add_argument("--batch_size", type=int, default=5, help="batch_size per gpu")
+parser.add_argument("--batch_size", type=int, default=16, help="batch_size per gpu")
 parser.add_argument("--num_workers", type=int, default=0, help="num_workers")
 parser.add_argument("--eval_interval", type=int, default=1, help="eval_interval")
 parser.add_argument("--model_name", type=str, default="synapse", help="model_name")
@@ -88,14 +88,13 @@ if __name__ == "__main__":
     net = build_doubleunet(num_classes=args.num_classes).cuda(0)
 
     print(args)
-    # Additional Info when using cuda，检查设备，查看设备已分配资源和已经保存资源
+    # Additional Info when using cuda，检查设备，尝试分配内存，并检查内存使用情况
     if device.type == "cuda":
-        print("我使用的设备是"+torch.cuda.get_device_name(0))
+        print("the cuda used is"+torch.cuda.get_device_name(0))
         print("Memory Usage:")
         print("Allocated:", round(torch.cuda.memory_allocated(0) / 1024**3, 1), "GB")
         print("Cached:   ", round(torch.cuda.memory_reserved(0) / 1024**3, 1), "GB")
 
-    #表示该程序只能看到为0的设备，也就是我的RTX2070
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
