@@ -238,9 +238,9 @@ class build_doubleunet(nn.Module):
         # 原始输出
         # return y1, y2
 
-        pred = y2.squeeze(dim=1)
-        print("pred: ", pred.shape)
-        return pred
+        # pred = y2.squeeze(dim=1)
+        # print("pred: ", pred.shape)
+        return y2
 
 if __name__ == "__main__":
     import numpy as np
