@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--root_path",
     type=str,
-    default="./data/Synapse/train_npz",
+    default="../data/Synapse/train_npz",
     help="root dir for train data",
 )
 parser.add_argument(
@@ -75,6 +75,7 @@ parser.add_argument(
     default=model.doubleunet_pytorch.build_doubleunet,
     help="The module that you want to load as the network, e.g. model.doubleunet_pytorch.build_doubleunet",
 )
+parser.add_argument("--in_channel", type=int, default=1, help="the channel of input image, default is 1")
 
 args = parser.parse_args()
 
@@ -84,7 +85,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
     print()
-    net = build_doubleunet( num_classes=args.num_classes).cuda(0)
+    net = build_doubleunet(num_classes=args.num_classes).cuda(0)
 
     print(args)
     # Additional Info when using cuda，检查设备，查看设备已分配资源和已经保存资源
@@ -118,6 +119,7 @@ if __name__ == "__main__":
             "root_path": args.root_path,
             "list_dir": args.list_dir,
             "num_classes": 9,
+            "in_channels": 1,
         },
     }
     print(args.root_path)
@@ -129,11 +131,12 @@ if __name__ == "__main__":
     args.num_classes = dataset_config[dataset_name]["num_classes"]
     args.root_path = dataset_config[dataset_name]["root_path"]
     args.list_dir = dataset_config[dataset_name]["list_dir"]
+    args.in_channels = dataset_config[dataset_name]["in_channels"]
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     # net = transformer(num_classes=args.num_classes).cuda(0)
-    net = build_doubleunet(num_classes=args.num_classes).cuda(0)
+    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes).cuda(0)
     trainer = {
         "Synapse": trainer_synapse,
     }

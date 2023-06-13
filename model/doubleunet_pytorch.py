@@ -90,7 +90,8 @@ class conv_block(nn.Module):
         x = self.a1(x)
         return x
 
-class encoder1(nn.Module):
+# 因为 vgg19 需要输入 3 通道的图片，所以启用原始的 encoder1
+class encoder_vgg(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -110,17 +111,65 @@ class encoder1(nn.Module):
         x3 = self.x3(x2)
         x4 = self.x4(x3)
         x5 = self.x5(x4)
+
         return x5, [x4, x3, x2, x1]
 
+class encoder1(nn.Module):
+    def __init__(self, in_channels=1):
+        super().__init__()
+
+        self.pool = nn.MaxPool2d((2, 2))
+
+        # self.c1 = conv_block(in_channels, 32)
+        # self.c2 = conv_block(32, 64)
+        # self.c3 = conv_block(64, 128)
+        # self.c4 = conv_block(128, 256)
+        # # 多卷积一层，能和原 vgg19 保持一致
+        # self.c5 = conv_block(256, 512)
+
+        self.c1 = conv_block(in_channels, 64)
+        self.c2 = conv_block(64, 128)
+        self.c3 = conv_block(128, 256)
+        self.c4 = conv_block(256, 512)
+        # 多卷积一层，能和原 vgg19 保持一致
+        # 多卷积的一层其实原始unet没有，似乎能提升效果？
+        # self.c5 = conv_block(512, 512)
+
+
+
+
+
+    def forward(self, x):
+        x0 = x
+
+        x1 = self.c1(x0)
+        p1 = self.pool(x1)
+
+        x2 = self.c2(p1)
+        p2 = self.pool(x2)
+
+        x3 = self.c3(p2)
+        p3 = self.pool(x3)
+
+        x4 = self.c4(p3)
+        p4 = self.pool(x4)
+
+        # x5 = self.c5(p4)
+
+        # return p4, [x4, x3, x2, x1]
+
+        # 多卷积一层，能和原 vgg19 保持一致
+        return p4, [x4, x3, x2, x1]
+
 class decoder1(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels=64, skip_channels=[512, 256, 128, 64]):
         super().__init__()
 
         self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        self.c1 = conv_block(64+512, 256)
-        self.c2 = conv_block(512, 128)
-        self.c3 = conv_block(256, 64)
-        self.c4 = conv_block(128, 32)
+        self.c1 = conv_block(in_channels + skip_channels[0], 256) # 输入 x.channel + skip.channel0, 输出 256
+        self.c2 = conv_block(256 + skip_channels[1], 128) # 继承上一层的输出256，输入 256 + skip.channel1, 输出 128
+        self.c3 = conv_block(128 + skip_channels[2], 64)
+        self.c4 = conv_block(64 + skip_channels[3], 32)
 
     def forward(self, x, skip):
         s1, s2, s3, s4 = skip
@@ -144,12 +193,12 @@ class decoder1(nn.Module):
         return x
 
 class encoder2(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels=1):
         super().__init__()
 
         self.pool = nn.MaxPool2d((2, 2))
 
-        self.c1 = conv_block(3, 32)
+        self.c1 = conv_block(in_channels, 32)
         self.c2 = conv_block(32, 64)
         self.c3 = conv_block(64, 128)
         self.c4 = conv_block(128, 256)
@@ -203,16 +252,19 @@ class decoder2(nn.Module):
 
 class build_doubleunet(nn.Module):
     # def __init__(self):
-    def __init__(self, num_classes=1) -> None:
+    def __init__(self, in_channels=1 , num_classes=1) -> None:
         super().__init__()
 
-        self.e1 = encoder1()
+        if in_channels == 3:
+            self.e1 = encoder_vgg()
+        else:
+            self.e1 = encoder1(in_channels)
         self.a1 = ASPP(512, 64)
         self.d1 = decoder1()
         self.y1 = nn.Conv2d(32, 1, kernel_size=1, padding=0)
         self.sigmoid = nn.Sigmoid()
 
-        self.e2 = encoder2()
+        self.e2 = encoder2(in_channels)
         self.a2 = ASPP(256, 64)
         self.d2 = decoder2()
         # self.y2 = nn.Conv2d(32, 1, kernel_size=1, padding=0) # 输出为 b * 1 * h * w
@@ -220,8 +272,9 @@ class build_doubleunet(nn.Module):
 
 
     def forward(self, x):
-        x0 = x
-        x, skip1 = self.e1(x)
+        x0 = x # batch_size * c * h * w
+        # todo 不使用5层的 encoder1改回4层
+        x, skip1 = self.e1(x)  
         x = self.a1(x)
         x = self.d1(x, skip1)
         y1 = self.y1(x)
@@ -244,10 +297,10 @@ class build_doubleunet(nn.Module):
 
 if __name__ == "__main__":
     import numpy as np
-    x = torch.randn((8, 3, 288, 384))
+    x = torch.randn((5, 1, 244, 244))
     model = build_doubleunet()
     y1, y2 = model(x)
-    print(y1.shape, y2.shape)
+    # print(y1.shape, y2.shape)
     # 将y1和y2作为图片保存下来
     # 将张量转换为 NumPy 数组
     img_array1 = y1.detach().numpy()
