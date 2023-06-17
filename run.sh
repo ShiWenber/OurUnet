@@ -6,4 +6,4 @@
 #         python train.py --data_path $data_path --model $model --epochs 60 --batch_size 10;
 #     done
 # done
-python train.py --num_workers 0 --max_epochs 1 --batch_size 12 --n_gpu 1 --patch_size 4  --has_se false --attentions 00
+python train.py --num_workers 0 --max_epochs 100 --batch_size 16 --n_gpu 1 --patch_size 4  --has_se 0 --attentions 00

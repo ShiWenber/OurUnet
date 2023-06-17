@@ -80,7 +80,7 @@ parser.add_argument(
 )
 parser.add_argument("--in_channels", type=int, default=1, help="the channel of input image, default is 1")
 parser.add_argument("--patch_size", type=int, default=4, help="the patch size of input image, default is 4")
-parser.add_argument("--has_se", type=bool, default=True, help="whether to use se module in each conv block, default is True")
+parser.add_argument("--has_se", type=int, default=1, help="whether to use se module in each conv block, default is True")
 parser.add_argument("--attentions", type=str, default="00", help=f"the attention in this doubleunet one for unet1, another one for unet2, default is 00, you can choose from {attention_enum_dict}, exsample: `python train.py --attentions 12`")
 
 args = parser.parse_args()
@@ -96,11 +96,12 @@ if __name__ == "__main__":
 
     import ast
 
-    print(args.attentions)
     assert len(args.attentions) == 2, "the length of attentions must be 2, [0] for unet1, [1] for unet2"
     for i in args.attentions:
         assert int(i) in attention_enum_dict.keys(), f"the attentions must be in {attention_enum_dict.keys()}"
     args.attentions = [attention_enum_dict[int(i)] for i in args.attentions]
+    args.has_se = bool(args.has_se)
+
     print(args) # Additionast.literal_eval(str(args.attentions))al Info when using cuda，检查设备，尝试分配内存，并检查内存使用情况
 
     
