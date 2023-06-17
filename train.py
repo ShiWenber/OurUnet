@@ -106,7 +106,7 @@ if __name__ == "__main__":
 
     
     # 测试显存分配
-    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions).cuda(0)
+    # net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions).cuda(0)
     if device.type == "cuda":
         print("the cuda used is"+torch.cuda.get_device_name(0))
         print("Memory Usage:")
@@ -154,9 +154,10 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     # net = transformer(num_classes=args.num_classes).cuda(0)
-    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions, has_se=args.has_se).cuda(0)
+    # net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions, has_se=args.has_se).cuda()
+    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions, has_se=args.has_se).to(device)
     trainer = {
         "Synapse": trainer_synapse,
     }
     print(trainer[dataset_name])
-    trainer[dataset_name](args, net, args.output_dir)
+    trainer[dataset_name](args, net, args.output_dir, device)

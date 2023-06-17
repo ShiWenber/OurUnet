@@ -104,7 +104,9 @@ def plot_result(dice, h, snapshot_path,args):
     df.to_csv(save_mode_path, sep='\t')
 
 
-def trainer_synapse(args, model, snapshot_path):
+def trainer_synapse(args, model, snapshot_path, device):
+    # 判断是否使用GPU。
+    # assert model.device.type == "cuda"
     # 创建存储测试结果的文件夹。
     os.makedirs(os.path.join(snapshot_path, 'test'), exist_ok=True)
     test_save_path = os.path.join(snapshot_path, 'test')
@@ -138,7 +140,7 @@ def trainer_synapse(args, model, snapshot_path):
     #                          worker_init_fn=worker_init_fn)
 
     # 保证取数据随机，内存不够大不要选pin_memory为True
-    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False,
+    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=False,
                              worker_init_fn=worker_init_fn)
     # 创建测试数据集和数据加载器。
     db_test = Synapse_dataset(base_dir=args.test_path, split="test_vol", list_dir=args.list_dir, img_size=args.img_size)
@@ -146,15 +148,15 @@ def trainer_synapse(args, model, snapshot_path):
     # testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
     # 保证测试集固定，防止结果波动
-    testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=False)
+    testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=0, pin_memory=False)
     # 如果有多个GPU，则使用DataParallel。
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
     # 设置模型为训练模式。
     model.train()
     # 定义损失函数和优化器。
-    ce_loss = CrossEntropyLoss()
-    dice_loss = DiceLoss(num_classes)
+    ce_loss = CrossEntropyLoss().to('cuda')
+    dice_loss = DiceLoss(num_classes).to("cuda")
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     print("snapshot_path", snapshot_path)
     time_str = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime(time.time()))
@@ -175,6 +177,7 @@ def trainer_synapse(args, model, snapshot_path):
             # 获取图像和标签批次。
             image_batch, label_batch = sampled_batch['image'], sampled_batch['label']
             # print("data shape---------", image_batch.shape, label_batch.shape)
+            # image_batch, label_batch = image_batch.cuda(), label_batch.squeeze(1).cuda()
             image_batch, label_batch = image_batch.cuda(), label_batch.squeeze(1).cuda()
             outputs1, inputs2, outputs = model(image_batch)
             # outputs = F.interpolate(outputs, size=label_batch.shape[1:], mode='bilinear', align_corners=False)
@@ -198,8 +201,8 @@ def trainer_synapse(args, model, snapshot_path):
             writer.add_scalar('info/total_loss', loss, iter_num)
             writer.add_scalar('info/loss_ce', loss_ce, iter_num)
             writer.add_scalar('info/loss_dice', loss_dice, iter_num)
-            writer.add_graph(model, image_batch)
-            # 记录训练信息。
+            # writer.add_graph(model, image_batch)
+            # 记录训练信息但不显示在标准输出中。
             # logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f' % (iter_num, loss.item(), loss_ce.item(), loss_dice.item()))
             # 可视化训练结果。
             # if iter_num % 20 == 0:
@@ -207,20 +210,21 @@ def trainer_synapse(args, model, snapshot_path):
                 image = image_batch[1, 0:1, :, :]
                 image = (image - image.min()) / (image.max() - image.min())
                 writer.add_image('train/Image', image, iter_num)
-                # writer.add_image('train/Image', image, iter_num / batch_size)
+                writer.add_image('train/Image', image, iter_num / batch_size)
                 outputs = torch.argmax(torch.softmax(outputs, dim=1), dim=1, keepdim=True)
-                # outputs1 = torch.argmax(torch.softmax(outputs1, dim=1), dim=1, keepdim=True)
-                # inputs2 = torch.argmax(torch.softmax(inputs2, dim=1), dim=1, keepdim=True)
+                outputs1 = torch.argmax(torch.softmax(outputs1, dim=1), dim=1, keepdim=True)
+                inputs2 = torch.argmax(torch.softmax(inputs2, dim=1), dim=1, keepdim=True)
                 writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num)
-                # writer.add_image('train/outputs1', outputs1[1, ...] * 50, iter_num)
-                # writer.add_image('train/inputs2', inputs2[1, ...] * 50, iter_num)
-                # writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
+                writer.add_image('train/outputs1', outputs1[1, ...] * 50, iter_num)
+                writer.add_image('train/inputs2', inputs2[1, ...] * 50, iter_num)
+                writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
                 labs = label_batch[1, ...].unsqueeze(0) * 50
                 writer.add_image('train/GroundTruth', labs, iter_num)
                 # writer.add_image('train/GroundTruth', labs, iter_num / batch_size)
         # Test
         # 测试
         eval_interval = args.eval_interval 
+        # 如果模型大于等于一半的迭代次数，并且迭代次数是eval_interval的倍数，则运行推理。
         if epoch_num >= int(max_epoch / 2) and (epoch_num + 1) % eval_interval == 0:
             # 保存模型。
             filename = f'{args.model_name}_epoch_{epoch_num}.pth'
