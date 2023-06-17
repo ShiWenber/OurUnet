@@ -93,12 +93,17 @@ class MobileViTAttention(nn.Module):
         y=x.clone() #bs,c,h,w
 
         ## Local Representation
-        y=self.conv2(self.conv1(x)) #bs,dim,h,w
+        y=self.conv1(x)
+        y=self.conv2(y) #bs,dim,h,w
 
         ## Global Representation
         _,_,h,w=y.shape
         y=rearrange(y,'bs dim (nh ph) (nw pw) -> bs (ph pw) (nh nw) dim',ph=self.ph,pw=self.pw) #bs,h,w,dim
+
+        # torch.backends.cudnn.enabled = False
         y=self.trans(y)
+        # torch.backends.cudnn.enabled = True
+
         y=rearrange(y,'bs (ph pw) (nh nw) dim -> bs dim (nh ph) (nw pw)',ph=self.ph,pw=self.pw,nh=h//self.ph,nw=w//self.pw) #bs,dim,h,w
 
         ## Fusion

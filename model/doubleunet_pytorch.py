@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import vgg19
+from .MobileViTAttention import MobileViTAttention
+from .biformer_parts.bra_nchw import nchwBRA
 
 class Conv2D(nn.Module):
     def __init__(self, in_c, out_c, kernel_size=3, padding=1, dilation=1, bias=False, act=True):
@@ -77,17 +79,19 @@ class ASPP(nn.Module):
         return y
 
 class conv_block(nn.Module):
-    def __init__(self, in_c, out_c):
+    def __init__(self, in_c, out_c, has_se: bool=True):
         super().__init__()
 
         self.c1 = Conv2D(in_c, out_c)
         self.c2 = Conv2D(out_c, out_c)
         self.a1 = squeeze_excitation_block(out_c)
+        self.has_se = has_se
 
     def forward(self, x):
         x = self.c1(x)
         x = self.c2(x)
-        x = self.a1(x)
+        if self.has_se:
+            x = self.a1(x)
         return x
 
 # 因为 vgg19 需要输入 3 通道的图片，所以启用原始的 encoder1
@@ -115,7 +119,7 @@ class encoder_vgg(nn.Module):
         return x5, [x4, x3, x2, x1]
 
 class encoder1(nn.Module):
-    def __init__(self, in_channels=1):
+    def __init__(self, in_channels=1, patch_size=4, attention: str="mobile_vit", has_se: bool=True):
         super().__init__()
 
         self.pool = nn.MaxPool2d((2, 2))
@@ -127,10 +131,18 @@ class encoder1(nn.Module):
         # # 多卷积一层，能和原 vgg19 保持一致
         # self.c5 = conv_block(256, 512)
 
-        self.c1 = conv_block(in_channels, 64)
-        self.c2 = conv_block(64, 128)
-        self.c3 = conv_block(128, 256)
-        self.c4 = conv_block(256, 512)
+        self.c1 = conv_block(in_channels, 64, has_se=has_se)
+        self.c2 = conv_block(64, 128, has_se=has_se)
+        self.c3 = conv_block(128, 256, has_se=has_se)
+        if attention == "mobile_vit":
+            self.a = MobileViTAttention(in_channel=256, patch_size=patch_size)
+        elif attention == "biformer":
+            self.a = nchwBRA(256)
+        elif attention == "none":
+            self.a = None
+        else:
+            raise ValueError("attention not supported")
+        self.c4 = conv_block(256, 512, has_se=has_se)
         # 多卷积一层，能和原 vgg19 保持一致
         # 多卷积的一层其实原始unet没有，似乎能提升效果？
         # self.c5 = conv_block(512, 512)
@@ -149,6 +161,9 @@ class encoder1(nn.Module):
         p2 = self.pool(x2)
 
         x3 = self.c3(p2)
+        # attention
+        if self.a is not None:
+            x3 = self.a(x3)
         p3 = self.pool(x3)
 
         x4 = self.c4(p3)
@@ -162,14 +177,14 @@ class encoder1(nn.Module):
         return p4, [x4, x3, x2, x1]
 
 class decoder1(nn.Module):
-    def __init__(self, in_channels=64, skip_channels=[512, 256, 128, 64]):
+    def __init__(self, in_channels=64, skip_channels=[512, 256, 128, 64], has_se: bool=True):
         super().__init__()
 
         self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        self.c1 = conv_block(in_channels + skip_channels[0], 256) # 输入 x.channel + skip.channel0, 输出 256
-        self.c2 = conv_block(256 + skip_channels[1], 128) # 继承上一层的输出256，输入 256 + skip.channel1, 输出 128
-        self.c3 = conv_block(128 + skip_channels[2], 64)
-        self.c4 = conv_block(64 + skip_channels[3], 32)
+        self.c1 = conv_block(in_channels + skip_channels[0], 256, has_se=has_se) # 输入 x.channel + skip.channel0, 输出 256
+        self.c2 = conv_block(256 + skip_channels[1], 128, has_se=has_se) # 继承上一层的输出256，输入 256 + skip.channel1, 输出 128
+        self.c3 = conv_block(128 + skip_channels[2], 64, has_se=has_se)
+        self.c4 = conv_block(64 + skip_channels[3], 32, has_se=has_se)
 
     def forward(self, x, skip):
         s1, s2, s3, s4 = skip
@@ -193,15 +208,24 @@ class decoder1(nn.Module):
         return x
 
 class encoder2(nn.Module):
-    def __init__(self, in_channels=1):
+    def __init__(self, in_channels=1, patch_size=4, attention: str="mobile_vit", has_se: bool=True):
         super().__init__()
 
         self.pool = nn.MaxPool2d((2, 2))
 
-        self.c1 = conv_block(in_channels, 32)
-        self.c2 = conv_block(32, 64)
-        self.c3 = conv_block(64, 128)
-        self.c4 = conv_block(128, 256)
+        self.c1 = conv_block(in_channels, 32, has_se=has_se)
+        self.c2 = conv_block(32, 64, has_se=has_se)
+        self.c3 = conv_block(64, 128, has_se=has_se)
+
+        if attention == "mobile_vit":
+            self.a = MobileViTAttention(in_channel=256, patch_size=patch_size)
+        elif attention == "biformer":
+            self.a = nchwBRA(256)
+        elif attention == "none":
+            self.a = None
+        else:
+            raise ValueError("attention not supported")
+        self.c4 = conv_block(128, 256, has_se=has_se)
 
     def forward(self, x):
         x0 = x
@@ -213,6 +237,8 @@ class encoder2(nn.Module):
         p2 = self.pool(x2)
 
         x3 = self.c3(p2)
+        if self.a is not None:
+            x3 = self.a(x3)
         p3 = self.pool(x3)
 
         x4 = self.c4(p3)
@@ -221,14 +247,14 @@ class encoder2(nn.Module):
         return p4, [x4, x3, x2, x1]
 
 class decoder2(nn.Module):
-    def __init__(self):
+    def __init__(self, has_se: bool=True):
         super().__init__()
 
         self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        self.c1 = conv_block(832, 256)
-        self.c2 = conv_block(640, 128)
-        self.c3 = conv_block(320, 64)
-        self.c4 = conv_block(160, 32)
+        self.c1 = conv_block(832, 256, has_se=has_se)
+        self.c2 = conv_block(640, 128, has_se=has_se)
+        self.c3 = conv_block(320, 64, has_se=has_se)
+        self.c4 = conv_block(160, 32, has_se=has_se)
 
     def forward(self, x, skip1, skip2):
 
@@ -252,21 +278,21 @@ class decoder2(nn.Module):
 
 class build_doubleunet(nn.Module):
     # def __init__(self):
-    def __init__(self, in_channels=1 , num_classes=1) -> None:
+    def __init__(self, in_channels=1 , num_classes=1, patch_size=4, attentions:list=["mobile_vit", "biformer"], has_se:bool = True) -> None:
         super().__init__()
 
         if in_channels == 3:
             self.e1 = encoder_vgg()
         else:
-            self.e1 = encoder1(in_channels)
+            self.e1 = encoder1(in_channels, patch_size=4, attention=attentions[0], has_se=has_se)
         self.a1 = ASPP(512, 64)
-        self.d1 = decoder1(in_channels=64, skip_channels=[512, 256, 128, 64]) # 输入 64 维度，并且将跨层连接的通道数设置为 [512, 256, 128, 64]
+        self.d1 = decoder1(in_channels=64, skip_channels=[512, 256, 128, 64], has_se=has_se) # 输入 64 维度，并且将跨层连接的通道数设置为 [512, 256, 128, 64]
         self.y1 = nn.Conv2d(32, 1, kernel_size=1, padding=0)
         self.sigmoid = nn.Sigmoid()
 
-        self.e2 = encoder2(in_channels)
+        self.e2 = encoder2(in_channels, patch_size=4, attention=attentions[1], has_se=has_se)
         self.a2 = ASPP(256, 64)
-        self.d2 = decoder2()
+        self.d2 = decoder2(has_se=has_se)
         # self.y2 = nn.Conv2d(32, 1, kernel_size=1, padding=0) # 输出为 b * 1 * h * w
         self.y2 = nn.Conv2d(32, num_classes, kernel_size=1, padding=0) # 输出为 b * num_classes * h * w
 
@@ -293,24 +319,27 @@ class build_doubleunet(nn.Module):
 
         # pred = y2.squeeze(dim=1)
         # print("pred: ", pred.shape)
-        return y2
+        return y1, input_x, y2
 
 if __name__ == "__main__":
     import numpy as np
-    x = torch.randn((5, 1, 244, 244))
+    x = torch.randn((5, 1, 224, 224))
     model = build_doubleunet()
-    y1, y2 = model(x)
+    y1, input2, y2 = model(x)
     # print(y1.shape, y2.shape)
     # 将y1和y2作为图片保存下来
     # 将张量转换为 NumPy 数组
     img_array1 = y1.detach().numpy()
     img_array2 = y2.detach().numpy()
+    img_array3 = input2.detach().numpy()
 
     from PIL import Image
     img1 = Image.fromarray(np.uint8(img_array2[0, 0] * 255), mode='L')
     img2 = Image.fromarray(np.uint8(img_array2[0, 0] * 255), mode='L')
+    img3 = Image.fromarray(np.uint8(img_array3[0, 0] * 255), mode='L')
 
     # 将图像保存到文件中
     img1.save('image.png')
     img2.save('image2.png')
+    img3.save('input2.png')
     # 输入格式为 8 , 1, 256, 256

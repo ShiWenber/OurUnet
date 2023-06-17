@@ -77,7 +77,7 @@ def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_s
 
             net.eval()
             with torch.no_grad():
-                outputs = net(input)
+                outputs1, inputs2, outputs = net(input)
                 # outputs = F.interpolate(outputs, size=slice.shape[:], mode='bilinear', align_corners=False)
                 out = torch.argmax(torch.softmax(outputs, dim=1), dim=1).squeeze(0)
                 out = out.cpu().detach().numpy()
@@ -91,7 +91,8 @@ def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_s
             0).unsqueeze(0).float().cuda()
         net.eval()
         with torch.no_grad():
-            out = torch.argmax(torch.softmax(net(input), dim=1), dim=1).squeeze(0)
+            outputs1, inputs2, outputs = net(input)
+            out = torch.argmax(torch.softmax(outputs, dim=1), dim=1).squeeze(0)
             prediction = out.cpu().detach().numpy()
     metric_list = []
     for i in range(1, classes):

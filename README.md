@@ -1,45 +1,35 @@
 # 实验记录
 
-- [ ] 用log实现自动化实验日志
+## Q & A
 
-数据集：原始30 + 锐化30
-epochs: 60
-batch_size: 1
-best_loss: 0.0651
+if you get the error like this:
 
-dataset: origin
-epochs: 60
-batch_size: 1
-best_loss:  tensor(0.0849, device='cuda:0',
-       grad_fn=<BinaryCrossEntropyWithLogitsBackward0>)
+```bash
+Traceback (most recent call last):
+  File "train.py", line 144, in <module>
+    trainer[dataset_name](args, net, args.output_dir)
+  File "/root/models/unet/trainer.py", line 179, in trainer_synapse
+    loss.backward()
+  File "/opt/conda/lib/python3.7/site-packages/torch/_tensor.py", line 396, in backward
+    torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
+  File "/opt/conda/lib/python3.7/site-packages/torch/autograd/__init__.py", line 175, in backward
+    allow_unreachable=True, accumulate_grad=True)  # Calls into the C++ engine to run the backward pass
+RuntimeError: Unable to find a valid cuDNN algorithm to run convolution
+```
 
-dataset: origin
-epochs: 40
-batch_size: 2
-best_loss:  tensor(0.0967, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward>)
-end_loss: 0.1069
+you may think about it is the problem of mobile_vit or cuDNN, but it is not. It is a cuda memory problem. You can try to reduce the batch size.
 
-dataset: origin
-epochs: 60
-batch_size: 1
-best_loss: best_loss:  tensor(0.0375, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward>)
-end_loss: 
+## train command
 
-best_loss:  tensor(0.0353, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward>)
+```bash
+python train.py --num_workers 0 --max_epochs 50 --batch_size 12 --n_gpu 1 --patch_size 4  --has_se True --attentions 00
+```
 
-dataset: 锐化30 + 原始30
-epochs: 60
-batch_size: 1
-best_loss: best_loss:  tensor(0.0306, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward>)
+`has_se` means whether to use SE module, `attentions` means the attentions used in model（first num for unet1, second num for unet2）
 
-dataset: 锐化30 + 原始30
-epochs: 60
-batch_size: 1
-best_loss:  tensor(0.0353, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward>)
+<!-- 目前有 mobile_vit 和 biformer -->
+So far, supported attentions is
 
-dataset: 原始30
-epochs: 60
-batch_size: 1
-best_loss:  tensor(0.0523, device='cuda:0', grad_fn=<BinaryCrossEntropyWithLogitsBackward>)
-
-经过实验，60轮epoch下，锐化30 + 原始30的数据集loss能达到0.03左右，而原始30的数据集loss能达到0.05左右，使用注意力机制后，loss也能达到0.03左右
+```python
+attention_enum_dict = {0:"none", 1:"mobile_vit", 2:"biformer"}
+```

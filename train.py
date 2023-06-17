@@ -15,6 +15,9 @@ from model.doubleunet_pytorch import build_doubleunet
 from trainer import trainer_synapse
 warnings.filterwarnings("ignore")
 
+# TODO
+attention_enum_dict = {0:"none", 1:"mobile_vit", 2:"biformer"}
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--root_path",
@@ -34,7 +37,7 @@ parser.add_argument("--num_classes", type=int, default=9, help="output channel o
 parser.add_argument("--output_dir", type=str, default="./model_out", help="output dir")
 # parser.add_argument("--max_iterations", type=int, default=200, help="maximum epoch number to train")
 parser.add_argument("--max_epochs", type=int, default=1, help="maximum epoch number to train")
-parser.add_argument("--batch_size", type=int, default=16, help="batch_size per gpu")
+parser.add_argument("--batch_size", type=int, default=8, help="batch_size per gpu")
 parser.add_argument("--num_workers", type=int, default=0, help="num_workers")
 parser.add_argument("--eval_interval", type=int, default=1, help="eval_interval")
 parser.add_argument("--model_name", type=str, default="synapse", help="model_name")
@@ -75,7 +78,10 @@ parser.add_argument(
     default=model.doubleunet_pytorch.build_doubleunet,
     help="The module that you want to load as the network, e.g. model.doubleunet_pytorch.build_doubleunet",
 )
-parser.add_argument("--in_channel", type=int, default=1, help="the channel of input image, default is 1")
+parser.add_argument("--in_channels", type=int, default=1, help="the channel of input image, default is 1")
+parser.add_argument("--patch_size", type=int, default=4, help="the patch size of input image, default is 4")
+parser.add_argument("--has_se", type=bool, default=True, help="whether to use se module in each conv block, default is True")
+parser.add_argument("--attentions", type=str, default="00", help=f"the attention in this doubleunet one for unet1, another one for unet2, default is 00, you can choose from {attention_enum_dict}, exsample: `python train.py --attentions 12`")
 
 args = parser.parse_args()
 
@@ -85,10 +91,21 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
     print()
-    net = build_doubleunet(num_classes=args.num_classes).cuda(0)
 
-    print(args)
-    # Additional Info when using cuda，检查设备，尝试分配内存，并检查内存使用情况
+
+
+    import ast
+
+    print(args.attentions)
+    assert len(args.attentions) == 2, "the length of attentions must be 2, [0] for unet1, [1] for unet2"
+    for i in args.attentions:
+        assert int(i) in attention_enum_dict.keys(), f"the attentions must be in {attention_enum_dict.keys()}"
+    args.attentions = [attention_enum_dict[int(i)] for i in args.attentions]
+    print(args) # Additionast.literal_eval(str(args.attentions))al Info when using cuda，检查设备，尝试分配内存，并检查内存使用情况
+
+    
+    # 测试显存分配
+    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions).cuda(0)
     if device.type == "cuda":
         print("the cuda used is"+torch.cuda.get_device_name(0))
         print("Memory Usage:")
@@ -99,6 +116,7 @@ if __name__ == "__main__":
 
 
 
+    # 似乎涉及启动cudnn加速，但是mobilevit不支持cudnn加速算法
     if not args.deterministic:
         cudnn.benchmark = True
         cudnn.deterministic = False
@@ -135,7 +153,7 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     # net = transformer(num_classes=args.num_classes).cuda(0)
-    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes).cuda(0)
+    net = build_doubleunet(in_channels=args.in_channels, num_classes=args.num_classes, patch_size=args.patch_size, attentions=args.attentions, has_se=args.has_se).cuda(0)
     trainer = {
         "Synapse": trainer_synapse,
     }

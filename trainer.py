@@ -23,7 +23,7 @@ import pandas as pd
 import datetime
 
 
-def inference(model, testloader, args, test_save_path=None):
+def inference(model, testloader, args, test_save_path=None, writer: SummaryWriter=None):
     # 将模型设置为评估模式。
     model.eval()
     # 初始化度量列表，用于累加各批次的度量值。
@@ -43,12 +43,21 @@ def inference(model, testloader, args, test_save_path=None):
         logging.info(' idx %d case %s mean_dice %f mean_hd95 %f' % (i_batch, case_name, np.mean(metric_i, axis=0)[0], np.mean(metric_i, axis=0)[1]))
     # 计算整个测试集的平均度量值。
     metric_list = metric_list / len(testloader.dataset)
+    class_2_result = {}
     # 计算整个测试集的平均度量值。
     for i in range(1, args.num_classes):
         logging.info('Mean class %d mean_dice %f mean_hd95 %f' % (i, metric_list[i-1][0], metric_list[i-1][1]))
+        class_2_result[f"mean_dice_{i}"] = metric_list[i-1][0]
+        class_2_result[f"mean_hd95_{i}"] = metric_list[i-1][1]
+    
     # 计算总体性能指标。
     performance = np.mean(metric_list, axis=0)[0]
     mean_hd95 = np.mean(metric_list, axis=0)[1]
+
+    class_2_result["mean_dice"] = performance 
+    class_2_result["mean_hd95"] = mean_hd95
+    writer.add_hparams(vars(args), class_2_result, name='total_result')
+
     # 打印测试性能。
     logging.info('Testing performance in best val model: mean_dice : %f mean_hd95 : %f' % (performance, mean_hd95))
     # 打印测试性能。
@@ -167,7 +176,7 @@ def trainer_synapse(args, model, snapshot_path):
             image_batch, label_batch = sampled_batch['image'], sampled_batch['label']
             # print("data shape---------", image_batch.shape, label_batch.shape)
             image_batch, label_batch = image_batch.cuda(), label_batch.squeeze(1).cuda()
-            outputs = model(image_batch)
+            outputs1, inputs2, outputs = model(image_batch)
             # outputs = F.interpolate(outputs, size=label_batch.shape[1:], mode='bilinear', align_corners=False)
             # 计算损失。
             loss_ce = ce_loss(outputs, label_batch[:].long())
@@ -189,6 +198,7 @@ def trainer_synapse(args, model, snapshot_path):
             writer.add_scalar('info/total_loss', loss, iter_num)
             writer.add_scalar('info/loss_ce', loss_ce, iter_num)
             writer.add_scalar('info/loss_dice', loss_dice, iter_num)
+            writer.add_graph(model, image_batch)
             # 记录训练信息。
             # logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f' % (iter_num, loss.item(), loss_ce.item(), loss_dice.item()))
             # 可视化训练结果。
@@ -199,7 +209,11 @@ def trainer_synapse(args, model, snapshot_path):
                 writer.add_image('train/Image', image, iter_num)
                 # writer.add_image('train/Image', image, iter_num / batch_size)
                 outputs = torch.argmax(torch.softmax(outputs, dim=1), dim=1, keepdim=True)
+                outputs1 = torch.argmax(torch.softmax(outputs1, dim=1), dim=1, keepdim=True)
+                inputs2 = torch.argmax(torch.softmax(inputs2, dim=1), dim=1, keepdim=True)
                 writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num)
+                writer.add_image('train/outputs1', outputs1[1, ...] * 50, iter_num)
+                writer.add_image('train/inputs2', inputs2[1, ...] * 50, iter_num)
                 # writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
                 labs = label_batch[1, ...].unsqueeze(0) * 50
                 writer.add_image('train/GroundTruth', labs, iter_num)
@@ -217,7 +231,7 @@ def trainer_synapse(args, model, snapshot_path):
             logging.info("*" * 20)
             logging.info(f"Running Inference after epoch {epoch_num}")
             print(f"Epoch {epoch_num}")
-            mean_dice, mean_hd95 = inference(model, testloader, args, test_save_path=test_save_path)
+            mean_dice, mean_hd95 = inference(model, testloader, args, test_save_path=test_save_path, writer=writer)
             dice_.append(mean_dice)
             hd95_.append(mean_hd95)
             model.train()
@@ -232,11 +246,10 @@ def trainer_synapse(args, model, snapshot_path):
                 logging.info("*" * 20)
                 logging.info(f"Running Inference after epoch {epoch_num} (Last Epoch)")
                 print(f"Epoch {epoch_num}, Last Epcoh")
-                mean_dice, mean_hd95 = inference(model, testloader, args, test_save_path=test_save_path)
+                mean_dice, mean_hd95 = inference(model, testloader, args, test_save_path=test_save_path, writer=writer)
                 dice_.append(mean_dice)
                 hd95_.append(mean_hd95)
                 model.train()
-                
             iterator.close()
             break
     # 绘制结果并关闭资源。
