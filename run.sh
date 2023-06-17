@@ -6,4 +6,16 @@
 #         python train.py --data_path $data_path --model $model --epochs 60 --batch_size 10;
 #     done
 # done
-python train.py --num_workers 0 --max_epochs 100 --batch_size 16 --n_gpu 1 --patch_size 4  --has_se 0 --attentions 00
+
+python train.py --num_workers 0 --max_epochs 100 --batch_size 16 --n_gpu 1 --patch_size 4  --has_se 0 --attentions 00 --output_dir ./model_out/task1
+
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 1 --attentions 11 # pid 607373
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 4 --patch_size 4  --has_se 1 --attentions 22 # pid 607374
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 1 --attentions 12 # pid
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 1 --attentions 21 # pid
+
+
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 0 --attentions 11 # pid
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 0 --attentions 22 # pid
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 0 --attentions 12 # pid
+# python train.py --num_workers 2 --max_epochs 100 --batch_size 32 --n_gpu 2 --patch_size 4  --has_se 0 --attentions 21 # pid

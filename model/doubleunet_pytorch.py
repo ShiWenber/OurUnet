@@ -218,9 +218,9 @@ class encoder2(nn.Module):
         self.c3 = conv_block(64, 128, has_se=has_se)
 
         if attention == "mobile_vit":
-            self.a = MobileViTAttention(in_channel=256, patch_size=patch_size)
+            self.a = MobileViTAttention(in_channel=128, patch_size=patch_size)
         elif attention == "biformer":
-            self.a = nchwBRA(256)
+            self.a = nchwBRA(128)
         elif attention == "none":
             self.a = None
         else:

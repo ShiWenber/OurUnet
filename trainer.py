@@ -157,7 +157,7 @@ def trainer_synapse(args, model, snapshot_path):
     dice_loss = DiceLoss(num_classes)
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     print("snapshot_path", snapshot_path)
-    time_str = time.strftime('%Y-%m-%d-%H-%M')
+    time_str = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime(time.time()))
     writer = SummaryWriter(snapshot_path + '/log' + time_str)
     iter_num = 0
     max_epoch = args.max_epochs
@@ -209,11 +209,11 @@ def trainer_synapse(args, model, snapshot_path):
                 writer.add_image('train/Image', image, iter_num)
                 # writer.add_image('train/Image', image, iter_num / batch_size)
                 outputs = torch.argmax(torch.softmax(outputs, dim=1), dim=1, keepdim=True)
-                outputs1 = torch.argmax(torch.softmax(outputs1, dim=1), dim=1, keepdim=True)
-                inputs2 = torch.argmax(torch.softmax(inputs2, dim=1), dim=1, keepdim=True)
+                # outputs1 = torch.argmax(torch.softmax(outputs1, dim=1), dim=1, keepdim=True)
+                # inputs2 = torch.argmax(torch.softmax(inputs2, dim=1), dim=1, keepdim=True)
                 writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num)
-                writer.add_image('train/outputs1', outputs1[1, ...] * 50, iter_num)
-                writer.add_image('train/inputs2', inputs2[1, ...] * 50, iter_num)
+                # writer.add_image('train/outputs1', outputs1[1, ...] * 50, iter_num)
+                # writer.add_image('train/inputs2', inputs2[1, ...] * 50, iter_num)
                 # writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
                 labs = label_batch[1, ...].unsqueeze(0) * 50
                 writer.add_image('train/GroundTruth', labs, iter_num)
