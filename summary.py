@@ -38,33 +38,62 @@ def get_acc(paths: list()):
         tuple: (acc_max, acc_mean, acc_minus, acc_plus, acc_ls)
     """
     # data = open("./nohup_logs/20230515002301/IMDB-BINARY.log").read()
-    acc_ls = []
+    mean_dice_ls = []
+    mean_hd95_ls = []
     for path in paths:
         data = open(path).read()
         # 按照换行符和逗号分割字符串
         data_ls = data.split("\n")
         for i in data_ls:
-            for j in i.split(","):
-                if (j.startswith("Acc")):
+            for j in i.split("model: "):
+                if (j.startswith("mean_dice :")):
                     # print(j)
-                    j.replace("Acc: ","")
-                    acc = float(j.split(": ")[1])
-                    acc_ls.append(acc)
-    if len(acc_ls) == 0:
+                    print(j)
+                    ls = [x.split(": ") for x in j.split()]
+
+                    mean_dice = float(ls[2][0])
+                    mean_hd95 = float(ls[5][0])
+                    if (mean_dice <= 0.20 or mean_hd95 <= 5):
+                        continue
+                    mean_dice_ls.append(mean_dice)
+                    mean_hd95_ls.append(mean_hd95)
+
+    if len(mean_dice_ls) == 0:
         print(f"{path} acc_ls is null")
         return None
 
     # 计算acc的平均值和+/-误差
-    acc_mean = np.mean(acc_ls)
-    print("acc_mean: ",acc_mean)
-    acc_max = np.max(acc_ls)
-    print("acc_max", acc_max)
+    acc_mean = np.mean(mean_dice_ls)
+    # print("acc_mean: ",acc_mean)
+    mean_dice_max = np.max(mean_dice_ls)
+    # 获得其对应的hd95
+    d_max_hd95 = mean_hd95_ls[mean_dice_ls.index(mean_dice_max)]
+    mean_hd95_min = np.min(mean_hd95_ls)
+    # 获得其对应的dice
+    hd95_min_dice = mean_dice_ls[mean_hd95_ls.index(mean_hd95_min)]
+    print("mean_dice_max", (mean_dice_max, d_max_hd95))
+    print("mean_hd95_max", (mean_hd95_min, hd95_min_dice))
+
+    pair_ls = [(mean_dice_ls[i], mean_hd95_ls[i]) for i in range(len(mean_dice_ls))]
+
+    # 按照 dice 从大到小排序，且输出其对应的 hd95
+    # print("mean_dice_max->min", sorted(pair_ls, key=lambda x: x[0], reverse=True))
+    # 输出到csv文件
+    with open("mean_dice_max->min.csv", "w") as f:
+        for i in sorted(pair_ls, key=lambda x: x[0], reverse=True):
+            f.write(f"{i[0]},{i[1]}\n")
+    # 按照 hd95 从小到大排序，且输出其对应的 dice
+    # print("mean_hd95_min->max", sorted(pair_ls, key=lambda x: x[1], reverse=False))
+    with open("mean_hd95_min->max.csv", "w") as f:
+        for i in sorted(pair_ls, key=lambda x: x[1], reverse=False):
+            f.write(f"{i[0]},{i[1]}\n")
+
     # 计算负误差
-    acc_minus = acc_mean - np.min(acc_ls)
-    acc_plus = np.max(acc_ls) - acc_mean
-    print("acc_minus: ",acc_minus)
-    print("acc_plus: ",acc_plus)
-    return acc_max, acc_mean, acc_minus, acc_plus, acc_ls
+    acc_minus = acc_mean - np.min(mean_dice_ls)
+    acc_plus = np.max(mean_dice_ls) - acc_mean
+    # print("acc_minus: ",acc_minus)
+    # print("acc_plus: ",acc_plus)
+    return (mean_dice_max, d_max_hd95), (mean_hd95_min, hd95_min_dice)
 
 if __name__ == "__main__":
     import os
@@ -85,7 +114,8 @@ if __name__ == "__main__":
     file_path_ls = []
     for i in dir_path_ls:    
         rootpath = i
-        paths = get_files_by_re(rootpath, "^[\s\S]*\log.txt$")
+        # paths = get_files_by_re(rootpath, "^[\s\S]*log.txt$")
+        paths = get_files_by_re(rootpath, "^[\s\S]*log.txt$")
         file_path_ls += paths
     print(file_path_ls)
 
@@ -107,9 +137,8 @@ if __name__ == "__main__":
         res = get_acc(dataname_2_path_ls_dict[i])
         if (res == None):
             continue
-        acc_max = res[0]
         name = i
-        acc_dict[name] = acc_max
+        acc_dict[name] = res
 
     print(dataname_2_path_ls_dict) 
     print()

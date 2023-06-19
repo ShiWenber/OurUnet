@@ -203,21 +203,27 @@ def trainer_synapse(args, model, snapshot_path, device):
             writer.add_scalar('info/loss_dice', loss_dice, iter_num)
             # writer.add_graph(model, image_batch)
             # 记录训练信息但不显示在标准输出中。
-            # logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f' % (iter_num, loss.item(), loss_ce.item(), loss_dice.item()))
+            logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f' % (iter_num, loss.item(), loss_ce.item(), loss_dice.item()))
             # 可视化训练结果。
             # if iter_num % 20 == 0:
             if iter_num % 20 == 0:
                 image = image_batch[1, 0:1, :, :]
                 image = (image - image.min()) / (image.max() - image.min())
                 writer.add_image('train/Image', image, iter_num)
-                writer.add_image('train/Image', image, iter_num / batch_size)
+                # writer.add_image('train/Image', image, iter_num / batch_size)
                 outputs = torch.argmax(torch.softmax(outputs, dim=1), dim=1, keepdim=True)
                 outputs1 = torch.argmax(torch.softmax(outputs1, dim=1), dim=1, keepdim=True)
                 inputs2 = torch.argmax(torch.softmax(inputs2, dim=1), dim=1, keepdim=True)
+                print("outputs shape", outputs.shape)
+                print("outputs max", outputs.max())
+                print("outputs1 shape", outputs1.shape)
+                print("outputs1 max", outputs1.max())
+                print("inputs2 shape", inputs2.shape)
+                print("outputs2 max", inputs2.max())
                 writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num)
                 writer.add_image('train/outputs1', outputs1[1, ...] * 50, iter_num)
                 writer.add_image('train/inputs2', inputs2[1, ...] * 50, iter_num)
-                writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
+                # writer.add_image('train/Prediction', outputs[1, ...] * 50, iter_num / batch_size)
                 labs = label_batch[1, ...].unsqueeze(0) * 50
                 writer.add_image('train/GroundTruth', labs, iter_num)
                 # writer.add_image('train/GroundTruth', labs, iter_num / batch_size)
@@ -225,7 +231,7 @@ def trainer_synapse(args, model, snapshot_path, device):
         # 测试
         eval_interval = args.eval_interval 
         # 如果模型大于等于一半的迭代次数，并且迭代次数是eval_interval的倍数，则运行推理。
-        if epoch_num >= int(max_epoch / 2) and (epoch_num + 1) % eval_interval == 0:
+        if epoch_num >= int(max_epoch * 9 / 10) and (epoch_num + 1) % eval_interval == 0:
             # 保存模型。
             filename = f'{args.model_name}_epoch_{epoch_num}.pth'
             save_mode_path = os.path.join(snapshot_path, filename)
